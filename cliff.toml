@@ -33,6 +33,9 @@ filter_unconventional = true
 # 92f61df also carried the crash-on-terminal-close fix.
 commit_preprocessors = [
   { pattern = '^fix: stall until ipython/ipykernel#1529 arrives', replace = "fix: cells no longer hang after completion with ipykernel 7, and closing the terminal doesn't crash jOtter" },
+  # entries starting with a key name would be capitalised (Gg, Zt)
+  { pattern = '^feat: gg and a vim jump list \(Ctrl\+o / Ctrl\+i\)', replace = "feat: vim jump list (Ctrl+o / Ctrl+i) and gg" },
+  { pattern = '^feat: zt, zz, zb scroll the selected cell to the top, middle, bottom', replace = "feat: scroll the selected cell to the top, middle or bottom with zt, zz, zb" },
 ]
 commit_parsers = [
   { message = "^feat", group = "<!-- 0 -->Features" },

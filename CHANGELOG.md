@@ -2,6 +2,32 @@
 
 Every release of jOtter. The same notes are on each [GitHub release](https://github.com/samox73/jotter/releases).
 
+## 0.4.0 (2026-10-12)
+
+### Features
+
+- Format code cells with an external formatter (f, F, format_on_save) ([a3d7dcd](https://github.com/samox73/jotter/commit/a3d7dcdc4fa06841ae5fb066684c86e780dbbe4b))
+- Vim command line (:w, :q, :wq, :x, :5) in a popup ([4729c78](https://github.com/samox73/jotter/commit/4729c7871420c6e3d3a17bc42f41c14bc8ad1b71))
+- Vim jump list (Ctrl+o / Ctrl+i) and gg ([0ce10b1](https://github.com/samox73/jotter/commit/0ce10b11c8cbd0348ca82f291ea7efbf01a2076c))
+- Select several cells with V and act on them all ([719d1ef](https://github.com/samox73/jotter/commit/719d1eff9d6a19e093f97361f7cd521db3c5ef7b))
+- P pastes cells above the selected one ([61e16d6](https://github.com/samox73/jotter/commit/61e16d6f68987bc8c6fc9fcdb8ebb9fb509698ca))
+- Scroll the selected cell to the top, middle or bottom with zt, zz, zb; zoom moves to zi ([9271b07](https://github.com/samox73/jotter/commit/9271b074b094eab333133534d595060b0e71efe0))
+- Vim marks on cells (ma, 'a, :delm) with a marks sidebar; cell type moves to t ([fad9a5d](https://github.com/samox73/jotter/commit/fad9a5d229b23d84d6d74d8d53671ea8ba85f615))
+
+### Bug fixes
+
+- Render inline math and spans in markdown headings ([9efe9e6](https://github.com/samox73/jotter/commit/9efe9e60c336c1205fd4378ec98c93b52109eb57))
+
+### Performance
+
+- Render only the cells near the screen ([f2c4659](https://github.com/samox73/jotter/commit/f2c4659b55e0bb36981811748ec7a3a86e5e7b3d))
+
+### Documentation
+
+- Portrait otter for the hero and header ([c71ff56](https://github.com/samox73/jotter/commit/c71ff5605daa8d04488ea881854b997397280e3e))
+- Compare jOtter with euporie, jpterm, jupyter-console and Neovim plugins ([5e443bf](https://github.com/samox73/jotter/commit/5e443bf07cc1811db2d5db661845aa4fc16433c8))
+- Re-record the plots and first-notebook clips for the zi and t keys ([5caf9d1](https://github.com/samox73/jotter/commit/5caf9d10952c7545254b2544c671971ee9afffd1))
+
 ## 0.3.0 (2026-10-05)
 
 ### Features
