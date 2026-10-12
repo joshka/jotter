@@ -1025,7 +1025,7 @@ impl Rendered {
             }
             if t.starts_with('#') {
                 let level = t.chars().take_while(|c| *c == '#').count();
-                let text = t.trim_start_matches('#').trim_start().to_string();
+                let text = t.trim_start_matches('#').trim_start();
                 let color = match level {
                     1 => Color::Green,
                     2 => Color::Cyan,
@@ -1035,7 +1035,10 @@ impl Rendered {
                 if level == 1 {
                     style = style.add_modifier(Modifier::UNDERLINED);
                 }
-                lines.push(Line::styled(text, style));
+                // inline spans ($math$, `code`, links) work in headings too;
+                // the line style colours whatever spans leave unstyled
+                let line = self.md_line(text, lines.len(), &mut images, est);
+                lines.push(line.style(style));
                 src_map.push(i);
                 continue;
             }
@@ -2894,7 +2897,7 @@ mod tests {
         let cell: Cell = serde_json::from_value(serde_json::json!({
             "cell_type": "markdown",
             "metadata": {},
-            "source": "on the $\\tau$ grid, and $ \\int_0^\\infty \\frac{1}{x^2} $ too"
+            "source": "on the $\\tau$ grid, and $ \\int_0^\\infty \\frac{1}{x^2} $ too\n## Read off $\\tau_\\mathrm{int}$"
         }))
         .unwrap();
         let nb = Notebook {
@@ -2905,11 +2908,15 @@ mod tests {
         let mut r = Rendered::build(&nb, Some(picker), Default::default());
         r.ensure(0, &nb.cells[0]);
         let block = &r.blocks[0];
-        assert_eq!(block.images.len(), 2);
+        assert_eq!(block.images.len(), 3, "heading math renders too");
+        assert_eq!(
+            (block.images[2].line, block.images[2].col),
+            (1, "Read off ".len() as u16)
+        );
         // ALL inline math is exactly one row; too small => author uses $$
         assert!(block.images.iter().all(|i| i.rows == 1));
         assert_eq!(block.images[0].col, "on the ".len() as u16);
-        assert_eq!(block.lines.len(), 1);
+        assert_eq!(block.lines.len(), 2);
     }
 
     #[test]
