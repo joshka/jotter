@@ -1407,7 +1407,8 @@ impl App {
                 // cell ops
                 KeyCode::Char('a') => self.insert_cell(self.selected + 1, rendered),
                 KeyCode::Char('b') => self.insert_cell(self.selected, rendered),
-                KeyCode::Char('p') => self.paste(rendered),
+                KeyCode::Char('p') => self.paste(self.selected + 1, rendered),
+                KeyCode::Char('P') => self.paste(self.selected, rendered),
                 KeyCode::Char('V') => self.visual = Some(self.selected),
                 KeyCode::Char('J') => {
                     self.move_cells(self.selected..self.selected + 1, 1, rendered);
@@ -2442,6 +2443,13 @@ pub(super) mod tests {
         assert!(app.visual.is_none(), "an operator ends the selection");
         app.on_key(key('p'), &mut r);
         assert_eq!(srcs(&app), "c0,c1,c2,c3,c4");
+        assert_eq!(app.selected, 3, "on the last pasted cell");
+        app.on_key(key('u'), &mut r);
+        app.selected = 0;
+        app.on_key(key('P'), &mut r); // before c0
+        assert_eq!(srcs(&app), "c1,c2,c3,c0,c4");
+        app.on_key(key('u'), &mut r);
+        app.on_key(key('p'), &mut r);
         app.on_key(key('u'), &mut r);
         app.on_key(key('u'), &mut r);
         app.on_key(key('u'), &mut r);

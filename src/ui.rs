@@ -2700,7 +2700,7 @@ pub const HELP: &[(&str, &[(&str, &str)])] = &[
         "Cells",
         &[
             ("a b", "new cell after / before"),
-            ("dd yy p", "delete / copy / paste cell"),
+            ("dd yy p P", "delete / copy / paste below, above"),
             ("M", "merge with the cell below"),
             ("V", "select cells (j k gg G extend)"),
             ("V: d y J K", "delete / copy / move selection"),

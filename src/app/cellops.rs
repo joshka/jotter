@@ -165,10 +165,10 @@ impl App {
         });
     }
 
-    /// `p`: the last deleted or yanked cells, after the selected one, as new
-    /// cells (fresh ids).
-    pub(super) fn paste(&mut self, rendered: &mut Rendered) {
-        let at = (self.selected + 1).min(self.notebook.cells.len());
+    /// `p` / `P`: the last deleted or yanked cells as new cells (fresh ids),
+    /// inserted at `at`: after (`selected + 1`) or before the selected cell.
+    pub(super) fn paste(&mut self, at: usize, rendered: &mut Rendered) {
+        let at = at.min(self.notebook.cells.len());
         let ops: Vec<CellOp> = (self.yanked.iter().cloned().enumerate())
             .map(|(k, mut cell)| {
                 cell.extra.insert("id".into(), new_cell_id().into());
