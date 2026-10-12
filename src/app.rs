@@ -175,6 +175,9 @@ pub struct App {
     /// `jump_at` == len means "at the newest position, not in the list".
     jumps: Vec<String>,
     jump_at: usize,
+    /// `ma`: mark letter -> cell id. Session only; a mark on a deleted cell
+    /// is gone until undo brings the cell (and its id) back.
+    pub marks: std::collections::BTreeMap<char, String>,
     /// Cells deleted or yanked last (`p` pastes them all).
     yanked: Vec<Cell>,
     /// `V`: anchor cell of the visual selection, which runs to `selected`.
@@ -362,6 +365,7 @@ impl App {
             pending: None,
             jumps: Vec::new(),
             jump_at: 0,
+            marks: Default::default(),
             yanked: Vec::new(),
             visual: None,
             kernel_name,
@@ -958,6 +962,13 @@ impl App {
                     self.message = Some(format!("{path} exists — :w! {path} overwrites"));
                 }
             }
+            ("delm!", "") => {
+                self.marks.clear();
+                self.message = Some("all marks deleted".into());
+            }
+            ("delm" | "delmarks", letters) if !letters.is_empty() => {
+                self.marks.retain(|c, _| !letters.contains(*c));
+            }
             ("q" | "q!", "") if editing => self.leave_editor(force, rendered),
             ("q", "") => self.quit(),
             ("q!" | "qa!", "") => self.should_quit = true,
@@ -1087,6 +1098,11 @@ impl App {
                 return;
             }
         }
+    }
+
+    /// Index of the cell mark `c` is on, if it's set and the cell exists.
+    pub fn mark_cell(&self, c: char) -> Option<usize> {
+        self.cell_index(self.marks.get(&c)?)
     }
 
     fn selected_id(&self) -> Option<String> {
@@ -1296,6 +1312,19 @@ impl App {
                 self.delete_cells(self.selected..self.selected + 1, rendered)
             }
             (Some('y'), KeyCode::Char('y')) => self.yank_cells(self.selected..self.selected + 1),
+            (Some('m'), KeyCode::Char(c)) if c.is_ascii_lowercase() => {
+                if let Some(id) = self.selected_id() {
+                    self.marks.insert(c, id);
+                    self.message = Some(format!("mark {c} set ('{c} jumps here)"));
+                }
+            }
+            (Some('\'' | '`'), KeyCode::Char(c)) => match self.mark_cell(c) {
+                Some(i) => {
+                    self.mark_jump();
+                    self.selected = i;
+                }
+                None => self.message = Some(format!("mark {c} not set")),
+            },
             (Some('z'), KeyCode::Char('t')) => self.align = Some(Align::Top),
             (Some('z'), KeyCode::Char('z')) => self.align = Some(Align::Middle),
             (Some('z'), KeyCode::Char('b')) => self.align = Some(Align::Bottom),
@@ -1441,7 +1470,10 @@ impl App {
                 KeyCode::Char('K') => {
                     self.move_cells(self.selected..self.selected + 1, -1, rendered);
                 }
-                KeyCode::Char('m') => self.toggle_type(rendered),
+                KeyCode::Char('t') => self.toggle_type(rendered),
+                KeyCode::Char('m') => self.pending = Some('m'),
+                KeyCode::Char('\'') => self.pending = Some('\''),
+                KeyCode::Char('`') => self.pending = Some('`'),
                 KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     if let Some(k) = &self.kernel {
                         k.interrupt();
@@ -2479,5 +2511,53 @@ pub(super) mod tests {
             app.on_key(key(c), &mut r);
         }
         assert!(app.visual.is_none());
+    }
+
+    #[test]
+    fn marks_set_jump_and_follow_their_cell() {
+        let (mut app, mut r) = one_cell_app("marks");
+        for _ in 0..3 {
+            app.on_key(key('a'), &mut r);
+        }
+        app.selected = 1;
+        app.on_key(key('m'), &mut r);
+        app.on_key(key('a'), &mut r);
+        assert_eq!(
+            app.notebook.cells.len(),
+            4,
+            "ma sets a mark, not a new cell"
+        );
+        app.selected = 3;
+        app.on_key(key('\''), &mut r);
+        app.on_key(key('a'), &mut r);
+        assert_eq!(app.selected, 1);
+        app.on_key(
+            KeyEvent::new(KeyCode::Char('o'), KeyModifiers::CONTROL),
+            &mut r,
+        );
+        assert_eq!(app.selected, 3, "a mark jump is a jump");
+        // the mark follows its cell; deleting the cell drops it, undo restores
+        app.selected = 0;
+        app.on_key(key('J'), &mut r);
+        assert_eq!(app.mark_cell('a'), Some(0));
+        app.selected = 0;
+        for c in ['d', 'd'] {
+            app.on_key(key(c), &mut r);
+        }
+        assert_eq!(app.mark_cell('a'), None);
+        app.on_key(key('u'), &mut r);
+        assert_eq!(app.mark_cell('a'), Some(0));
+        app.on_key(key('`'), &mut r);
+        app.on_key(key('b'), &mut r);
+        assert!(app.message.as_deref().unwrap().contains("not set"));
+        // t (not m) cycles the cell type now
+        app.on_key(key('t'), &mut r);
+        assert_eq!(app.notebook.cells[app.selected].cell_type, "markdown");
+        app.on_key(key(':'), &mut r);
+        for c in "delm a".chars() {
+            app.on_key(key(c), &mut r);
+        }
+        app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), &mut r);
+        assert!(app.marks.is_empty());
     }
 }

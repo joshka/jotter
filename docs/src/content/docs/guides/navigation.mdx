@@ -30,6 +30,14 @@ Most terminals send <kbd>Ctrl</kbd>+<kbd>i</kbd> as <kbd>Tab</kbd>, so <kbd>Tab<
 
 The view scrolls to keep the selected cell visible. Scrolling with the wheel doesn't move the selection. If the wheel is over a long output, it scrolls that output first; see [Outputs](/jotter/guides/outputs/#long-outputs).
 
+## Marks
+
+Marks work as in vim, on cells: <kbd>m</kbd> then a letter (<kbd>m</kbd><kbd>a</kbd>) marks the selected cell as `a`, and <kbd>'</kbd><kbd>a</kbd> (or <kbd>&#96;</kbd><kbd>a</kbd>) jumps back to it from anywhere. Marking another cell with the same letter moves the mark. A mark jump is a [jump](#jumping-back), so <kbd>Ctrl</kbd>+<kbd>o</kbd> returns to where you were.
+
+The marked cell's header shows its letter (`In [3] 'a`), and while any marks are set, a **Marks** sidebar on the right lists them in notebook order: letter, cell number and the cell's first line, with the selected cell's marks highlighted. The sidebar needs a terminal at least 80 columns wide; in a narrower one only the header letters show.
+
+A mark follows its cell when cells move. Deleting the cell removes its mark, and undoing the delete brings it back. `:delm a` deletes mark `a` (`:delm abc` several), and `:delm!` deletes them all. Marks last for the session; they aren't saved in the notebook.
+
 ## Searching
 
 Press <kbd>/</kbd>, type text and press <kbd>Enter</kbd>. jOtter selects the next cell whose source contains it, ignoring case. <kbd>n</kbd> and <kbd>N</kbd> go to the next and previous match, wrapping around the notebook.

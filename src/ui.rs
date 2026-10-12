@@ -1531,17 +1531,32 @@ fn type_color(cell: &Cell) -> Color {
 /// Colour of a `V` selection: no cell type uses blue.
 const VISUAL_COLOR: Color = Color::Blue;
 
-/// The gutter bar: bright on the selected cell, dimmed elsewhere, in the
-/// selection colour on cells in a `V` selection. Every modifier a markdown
-/// heading line carries is masked off.
-fn gutter_span(cell: &Cell, selected: bool, visual: bool) -> Span<'static> {
-    let color = if visual {
-        VISUAL_COLOR
-    } else {
-        type_color(cell)
-    };
-    let style = Style::new().fg(color).remove_modifier(Modifier::all());
-    let style = if selected {
+/// Whether a cell is highlighted: not, as the selected cell, or as part of
+/// a `V` selection (in the selection colour).
+#[derive(Clone, Copy, PartialEq)]
+enum Pick {
+    Off,
+    Selected,
+    Visual,
+}
+
+impl Pick {
+    fn color(self, cell: &Cell) -> Color {
+        if self == Pick::Visual {
+            VISUAL_COLOR
+        } else {
+            type_color(cell)
+        }
+    }
+}
+
+/// The gutter bar: bright on picked cells, dimmed elsewhere. Every modifier
+/// a markdown heading line carries is masked off.
+fn gutter_span(cell: &Cell, pick: Pick) -> Span<'static> {
+    let style = Style::new()
+        .fg(pick.color(cell))
+        .remove_modifier(Modifier::all());
+    let style = if pick != Pick::Off {
         style.add_modifier(Modifier::BOLD)
     } else {
         style.add_modifier(Modifier::DIM)
@@ -1554,11 +1569,11 @@ fn gutter_span(cell: &Cell, selected: bool, visual: bool) -> Span<'static> {
 /// `run`: None = idle, Some(false) = queued, Some(true) = executing.
 fn header_line(
     cell: &Cell,
-    selected: bool,
-    visual: bool,
+    pick: Pick,
     run: Option<bool>,
     editing: bool,
     elapsed: Option<std::time::Duration>,
+    marks: String,
     width: u16,
 ) -> Line<'static> {
     let label = match cell.cell_type.as_str() {
@@ -1573,26 +1588,25 @@ fn header_line(
         "raw" if is_latex_raw(cell) => "latex".to_string(),
         other => other.to_string(),
     };
-    let color = if visual {
-        VISUAL_COLOR
-    } else {
-        type_color(cell)
-    };
+    let color = pick.color(cell);
     let mut label_style = Style::new().fg(color).add_modifier(Modifier::BOLD);
-    if selected {
+    if pick != Pick::Off {
         label_style = label_style.add_modifier(Modifier::REVERSED);
     }
-    let rule = if selected {
+    let rule = if pick != Pick::Off {
         Style::new().fg(color)
     } else {
         Style::new().fg(Color::DarkGray)
     };
     let mut spans = vec![
-        gutter_span(cell, selected, visual),
+        gutter_span(cell, pick),
         Span::styled(format!(" {label} "), label_style),
     ];
     if editing {
         spans.push(Span::styled(" ✎", Style::new().fg(color)));
+    }
+    if !marks.is_empty() {
+        spans.push(Span::styled(format!(" {marks}"), MARK_STYLE));
     }
     if run.is_none()
         && let Some(d) = elapsed
@@ -1630,6 +1644,15 @@ pub fn draw(frame: &mut Frame, app: &mut App, rendered: &mut Rendered) {
     }
     let [body, status] =
         Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).areas(frame.area());
+    // marks sidebar on the right, when there are marks and room for it
+    let marks = mark_entries(app);
+    let (body, side) = if !marks.is_empty() && body.width >= 80 {
+        let [b, s] =
+            Layout::horizontal([Constraint::Min(0), Constraint::Length(MARKS_W)]).areas(body);
+        (b, Some(s))
+    } else {
+        (body, None)
+    };
     let height = body.height as usize;
 
     rendered.relayout(body.width, &app.notebook);
@@ -1639,7 +1662,11 @@ pub fn draw(frame: &mut Frame, app: &mut App, rendered: &mut Rendered) {
     // The editor's line count is authoritative for its logical lines.
     let editing_cell = app.editor.as_ref().map(|_| app.selected);
     let marked = app.sel_range(); // selected cell, or the whole `V` selection
-    let in_visual = |ci: usize| app.visual.is_some() && marked.contains(&ci);
+    let pick = |ci: usize| match (marked.contains(&ci), app.visual.is_some()) {
+        (false, _) => Pick::Off,
+        (true, false) => Pick::Selected,
+        (true, true) => Pick::Visual,
+    };
     let editor_src = app.editor.as_ref().map(|e| e.source()).unwrap_or_default();
     let editor_wrap = match (&app.editor, app.notebook.cells.get(app.selected)) {
         (Some(ed), Some(cell)) => {
@@ -1813,11 +1840,15 @@ pub fn draw(frame: &mut Frame, app: &mut App, rendered: &mut Rendered) {
             (
                 header_line(
                     cell,
-                    marked.contains(&ci),
-                    in_visual(ci),
+                    pick(ci),
                     run,
                     editing,
                     block.elapsed,
+                    marks
+                        .iter()
+                        .filter(|m| m.0 == ci)
+                        .map(|m| format!("'{}", m.1))
+                        .collect(),
                     body.width,
                 ),
                 HitKind::Other,
@@ -1838,8 +1869,7 @@ pub fn draw(frame: &mut Frame, app: &mut App, rendered: &mut Rendered) {
                 HitKind::Other // latex raw: no per-row mapping
             };
             let mut row = wrap.rows[b].clone();
-            row.spans
-                .insert(0, gutter_span(cell, marked.contains(&ci), in_visual(ci)));
+            row.spans.insert(0, gutter_span(cell, pick(ci)));
             (row, kind)
         } else if local <= v.src + v.win_rows {
             let out_row = v.win_start + (local - 1 - v.src);
@@ -2114,9 +2144,70 @@ pub fn draw(frame: &mut Frame, app: &mut App, rendered: &mut Rendered) {
     {
         draw_cmdline(frame, c); // nvim's own `:` line, same look
     }
+    if let Some(side) = side {
+        draw_marks(frame, side, app, &marks);
+    }
     if let Some(req) = &app.stdin_req {
         draw_stdin(frame, req);
     }
+}
+
+/// Width of the marks sidebar, borders included.
+const MARKS_W: u16 = 28;
+
+/// How mark letters show: in cell headers and the sidebar.
+const MARK_STYLE: Style = Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD);
+
+/// (cell index, letter) for every mark whose cell still exists, in notebook
+/// order (an outline), letters in order within a cell.
+fn mark_entries(app: &App) -> Vec<(usize, char)> {
+    let mut v: Vec<(usize, char)> = (app.marks.keys())
+        .filter_map(|&c| Some((app.mark_cell(c)?, c)))
+        .collect();
+    v.sort();
+    v
+}
+
+/// The marks sidebar: one row per mark, `'a  12  first line of the cell`,
+/// the selected cell's marks highlighted.
+fn draw_marks(frame: &mut Frame, area: Rect, app: &App, marks: &[(usize, char)]) {
+    use ratatui::widgets::{Block, BorderType};
+    let dim = Style::new().fg(Color::DarkGray);
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .border_style(dim)
+        .title(Span::styled(
+            " Marks ",
+            Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        ))
+        .title_bottom(Line::styled(" 'a jumps ", dim).right_aligned());
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    let num_w = app.notebook.cells.len().to_string().len();
+    let lines: Vec<Line> = marks
+        .iter()
+        .map(|&(i, c)| {
+            let first = app.notebook.cells[i]
+                .source
+                .lines()
+                .map(str::trim)
+                .find(|l| !l.is_empty())
+                .unwrap_or("(empty)");
+            let room = (inner.width as usize).saturating_sub(num_w + 6);
+            let first: String = first.chars().take(room).collect();
+            let text = if i == app.selected {
+                Style::new().add_modifier(Modifier::BOLD | Modifier::REVERSED)
+            } else {
+                Style::default()
+            };
+            Line::from(vec![
+                Span::styled(format!(" '{c} "), MARK_STYLE),
+                Span::styled(format!("{:>num_w$} ", i + 1), dim),
+                Span::styled(first, text),
+            ])
+        })
+        .collect();
+    frame.render_widget(Paragraph::new(lines), inner);
 }
 
 /// The `:` command line: a rounded box in the accent colour a quarter of
@@ -2669,6 +2760,7 @@ pub const HELP: &[(&str, &[(&str, &str)])] = &[
             ("Ctrl+o Ctrl+i", "jump back / forward (also Tab)"),
             ("5G", "go to cell 5"),
             ("zt zz zb", "scroll: cell at top / middle / bottom"),
+            ("ma 'a", "mark cell as a / jump to mark a"),
             ("/ n N", "search sources / next / previous"),
         ],
     ),
@@ -2679,7 +2771,7 @@ pub const HELP: &[(&str, &[(&str, &str)])] = &[
             ("i A", "edit in insert mode / at the end"),
             ("Esc", "leave the editor (normal mode)"),
             ("E", "edit cell in $EDITOR"),
-            ("m", "cycle code → markdown → latex"),
+            ("t", "cycle code → markdown → latex"),
             ("f F", "format cell / all code cells"),
         ],
     ),
@@ -2751,6 +2843,7 @@ pub const HELP: &[(&str, &[(&str, &str)])] = &[
             (":q :q! :qa", "notebook: quit / without saving"),
             (":wq :x", "save, then leave the cell or quit"),
             (":5", "go to cell 5"),
+            (":delm a :delm!", "delete mark a / all marks"),
         ],
     ),
     (
@@ -3711,5 +3804,59 @@ mod tests {
             6,
             "the view stays until it must move"
         );
+    }
+
+    #[test]
+    fn marks_show_in_headers_and_a_sidebar() {
+        let cells: Vec<_> = ["import numpy as np", "x = 1", "plot(x)"]
+            .iter()
+            .map(|s| serde_json::json!({"cell_type": "code", "metadata": {}, "source": [s], "outputs": []}))
+            .collect();
+        let nb_json =
+            serde_json::json!({"cells": cells, "metadata": {}, "nbformat": 4, "nbformat_minor": 5});
+        let path = std::env::temp_dir().join(format!("jotter-marks-{}.ipynb", std::process::id()));
+        std::fs::write(&path, nb_json.to_string()).unwrap();
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = crate::app::App::open(path.clone(), None, tx).unwrap();
+        std::fs::remove_file(&path).ok();
+        let id = |i: usize| {
+            app.notebook.cells[i].extra["id"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        };
+        let (a, b) = (id(2), id(0));
+        app.marks.insert('a', a);
+        app.marks.insert('b', b);
+        let mut rendered = Rendered::build(&app.notebook, None, Default::default());
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(90, 14)).unwrap();
+        terminal.draw(|f| draw(f, &mut app, &mut rendered)).unwrap();
+        let rows = buffer_rows(&terminal);
+        if std::env::var_os("JOTTER_SHOW").is_some() {
+            println!("{}", rows.join("\n"));
+        }
+        assert!(
+            rows[0].contains("In [ ]  'b") && rows[0].contains("Marks"),
+            "{}",
+            rows[0]
+        );
+        // sidebar in notebook order: b (cell 1) before a (cell 3)
+        let b_row = rows
+            .iter()
+            .position(|r| r.contains(" 'b 1 import numpy"))
+            .unwrap();
+        let a_row = rows
+            .iter()
+            .position(|r| r.contains(" 'a 3 plot(x)"))
+            .unwrap();
+        assert!(b_row < a_row);
+        // too narrow: no sidebar, headers still carry the letters
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(60, 14)).unwrap();
+        terminal.draw(|f| draw(f, &mut app, &mut rendered)).unwrap();
+        let rows = buffer_rows(&terminal);
+        assert!(!rows.join("").contains("Marks"));
+        assert!(rows[0].contains("'b"));
     }
 }

@@ -21,7 +21,7 @@ pause 500ms
 key shift+enter
 settle
 pause 1500ms
-key b m i --gap 500ms
+key b t i --gap 500ms
 send "## A sine wave
 
 We plot $y = \\sin x$ for $x \\in [0, 2\\pi]$:
