@@ -159,8 +159,12 @@ pub struct App {
     last_click: Option<(Instant, u16, u16)>,
     /// Pending question; the next key answers it (shown on the status line).
     pub confirm: Option<Confirm>,
-    /// First key of a two-key chord (dd).
+    /// First key of a two-key chord (dd, yy, gg).
     pending: Option<char>,
+    /// Vim-style jump list of cell ids (ids survive inserts and moves);
+    /// `jump_at` == len means "at the newest position, not in the list".
+    jumps: Vec<String>,
+    jump_at: usize,
     yanked: Option<Cell>,
     kernel_name: String,
     events_tx: mpsc::UnboundedSender<Event>,
@@ -232,6 +236,9 @@ fn osc52(text: &str) {
     let _ = write!(out, "\x1b]52;c;{b64}\x07");
     let _ = out.flush();
 }
+
+/// Jump list depth (vim's is 100).
+const JUMPS_CAP: usize = 100;
 
 /// Autosave location for `path`: `<state dir>/autosave/<absolute path with
 /// '/' as '%'>` (vim undodir style), so sidecars never litter the notebook's
@@ -339,6 +346,8 @@ impl App {
             last_click: None,
             confirm: None,
             pending: None,
+            jumps: Vec::new(),
+            jump_at: 0,
             yanked: None,
             kernel_name,
             events_tx,
@@ -949,6 +958,7 @@ impl App {
             }
             (n, "") if !editing && n.parse::<usize>().is_ok() => {
                 let last = self.notebook.cells.len().saturating_sub(1);
+                self.mark_jump();
                 self.selected = n.parse::<usize>().unwrap_or(1).saturating_sub(1).min(last);
             }
             _ => self.message = Some(format!("not a command: :{cmd}")),
@@ -1020,6 +1030,61 @@ impl App {
         true
     }
 
+    /// Before a jump (gg, G, :5, search): remember the selected cell. Like
+    /// vim, an entry for the same cell moves to the newest position.
+    fn mark_jump(&mut self) {
+        let Some(id) = self.selected_id() else { return };
+        self.jumps.retain(|j| *j != id);
+        self.jumps.push(id);
+        if self.jumps.len() > JUMPS_CAP {
+            self.jumps.remove(0);
+        }
+        self.jump_at = self.jumps.len();
+    }
+
+    /// Ctrl+o. Leaving the newest position records it first, so Ctrl+i
+    /// comes back to it.
+    fn jump_older(&mut self) {
+        if self.jump_at >= self.jumps.len() {
+            self.mark_jump();
+            self.jump_at = self.jumps.len().saturating_sub(1);
+        }
+        self.step_jump(-1);
+    }
+
+    /// Move `dir` entries through the jump list, skipping deleted cells and
+    /// the cell already selected.
+    fn step_jump(&mut self, dir: isize) {
+        let mut at = self.jump_at as isize;
+        loop {
+            at += dir;
+            let Some(id) = usize::try_from(at).ok().and_then(|a| self.jumps.get(a)) else {
+                self.message = Some("end of jump list".into());
+                return;
+            };
+            let Some(i) = self.cell_index(id) else {
+                continue;
+            };
+            if i != self.selected {
+                self.jump_at = at as usize;
+                self.selected = i;
+                return;
+            }
+        }
+    }
+
+    fn selected_id(&self) -> Option<String> {
+        let cell = self.notebook.cells.get(self.selected)?;
+        Some(cell.extra.get("id")?.as_str()?.to_string())
+    }
+
+    fn cell_index(&self, id: &str) -> Option<usize> {
+        self.notebook
+            .cells
+            .iter()
+            .position(|c| c.extra.get("id").and_then(Value::as_str) == Some(id))
+    }
+
     /// Select the next cell (dir = ±1, wrapping) whose source contains the
     /// query, case-insensitively.
     fn find(&mut self, dir: isize) {
@@ -1038,6 +1103,7 @@ impl App {
                 .get(i)
                 .is_some_and(|c| c.source.to_lowercase().contains(&q))
             {
+                self.mark_jump();
                 self.selected = i;
                 return;
             }
@@ -1155,6 +1221,10 @@ impl App {
         match (pending, key.code) {
             (Some('d'), KeyCode::Char('d')) => self.delete_cell(rendered),
             (Some('y'), KeyCode::Char('y')) => self.yank_cell(),
+            (Some('g'), KeyCode::Char('g')) => {
+                self.mark_jump();
+                self.selected = count.map_or(0, |c| c.saturating_sub(1).min(last)) // 5gg like 5G
+            }
             (Some(_), _) => {}
             (None, KeyCode::Char(c)) if c.is_ascii_digit() => {
                 self.count = Some(count.unwrap_or(0) * 10 + (c as usize - '0' as usize));
@@ -1193,11 +1263,23 @@ impl App {
                 KeyCode::Char('k') | KeyCode::Up => {
                     self.selected = self.selected.saturating_sub(step)
                 }
-                KeyCode::Char('g') => self.selected = 0,
+                KeyCode::Char('g') => {
+                    self.pending = Some('g');
+                    self.count = count; // keep it for 5gg
+                }
                 // `G` = last cell, `5G` = cell 5 (1-based, like vim)
                 KeyCode::Char('G') => {
+                    self.mark_jump();
                     self.selected = count.map_or(last, |c| c.saturating_sub(1).min(last))
                 }
+                // jump list; terminals without the kitty protocol send Ctrl+i as Tab
+                KeyCode::Char('o') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.jump_older()
+                }
+                KeyCode::Char('i') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.step_jump(1)
+                }
+                KeyCode::Tab => self.step_jump(1),
                 KeyCode::Char('d') => self.pending = Some('d'),
                 KeyCode::Char('y') => self.pending = Some('y'),
                 KeyCode::Char('/') => {
@@ -2237,5 +2319,40 @@ pub(super) mod tests {
         type_cmd(&mut app, &mut r, "q");
         assert!(app.should_quit, ":q in notebook mode quits");
         std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn gg_g_and_jump_list() {
+        let (mut app, mut r) = one_cell_app("jumps");
+        for _ in 0..4 {
+            app.on_key(key('a'), &mut r); // 5 cells, selection follows the new one
+        }
+        app.selected = 2;
+        let ctrl = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL);
+        app.on_key(key('g'), &mut r);
+        assert_eq!(app.selected, 2, "a lone g waits for its pair");
+        app.on_key(key('g'), &mut r);
+        assert_eq!(app.selected, 0);
+        app.on_key(key('G'), &mut r);
+        assert_eq!(app.selected, 4);
+        app.on_key(ctrl('o'), &mut r);
+        assert_eq!(app.selected, 0);
+        app.on_key(ctrl('o'), &mut r);
+        assert_eq!(app.selected, 2);
+        app.on_key(ctrl('o'), &mut r);
+        assert_eq!(app.selected, 2, "oldest entry: stays");
+        app.on_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE), &mut r);
+        assert_eq!(app.selected, 0, "Tab is Ctrl+i");
+        app.on_key(ctrl('i'), &mut r);
+        assert_eq!(app.selected, 4);
+        // the list follows cells: delete cell 0 and it is skipped
+        app.selected = 0;
+        app.on_key(key('d'), &mut r);
+        app.on_key(key('d'), &mut r);
+        app.on_key(key('3'), &mut r);
+        app.on_key(key('G'), &mut r); // from the (old) cell 1, now at 0
+        assert_eq!(app.selected, 2);
+        app.on_key(ctrl('o'), &mut r);
+        assert_eq!(app.selected, 0);
     }
 }

@@ -2638,7 +2638,8 @@ pub const HELP: &[(&str, &[(&str, &str)])] = &[
         "Navigate",
         &[
             ("j k", "next / previous cell (counts: 3j)"),
-            ("g G", "first / last cell"),
+            ("gg G", "first / last cell"),
+            ("Ctrl+o Ctrl+i", "jump back / forward (also Tab)"),
             ("5G", "go to cell 5"),
             ("/ n N", "search sources / next / previous"),
         ],
