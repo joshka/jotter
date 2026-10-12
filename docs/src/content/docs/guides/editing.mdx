@@ -20,7 +20,9 @@ jOtter is modal, like vim. **Notebook mode** works on whole cells: selecting, ru
 | double-click | Edit in insert mode at the click |
 | <kbd>Esc</kbd> | Insert mode → normal mode; normal mode → leave the cell |
 
-Leaving the cell keeps your changes in the notebook (it isn't saved to disk until you press <kbd>w</kbd>). <kbd>Shift</kbd>+<kbd>Enter</kbd> and <kbd>Ctrl</kbd>+<kbd>Enter</kbd> work inside the editor too: they leave the cell and run it.
+Leaving the cell keeps your changes in the notebook (it isn't saved to disk until you press <kbd>w</kbd>).
+
+As in vim, <kbd>:</kbd> opens a command line, both in notebook mode and in the editor's normal mode: `:w` saves (and keeps you in the cell), `:q` leaves the cell, `:wq` does both. In notebook mode `:q` quits jOtter and `:5` jumps to cell 5. See [all commands](/jotter/reference/keybindings/#commands). <kbd>Shift</kbd>+<kbd>Enter</kbd> and <kbd>Ctrl</kbd>+<kbd>Enter</kbd> work inside the editor too: they leave the cell and run it.
 
 ## The builtin editor
 

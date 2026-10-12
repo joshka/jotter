@@ -1947,12 +1947,20 @@ pub fn draw(frame: &mut Frame, app: &mut App, rendered: &mut Rendered) {
     };
     // rightmost slot: prompt input, nvim's cmdline, a pending question, then
     // the message
-    let tail = if let Some(p) = &app.prompt {
-        match p.kind {
-            crate::app::PromptKind::Search => format!("/{}▏", p.buf),
-            crate::app::PromptKind::SaveAs => format!("save as: {}▏", p.buf),
-        }
-    } else if let Some(c) = app.editor.as_ref().and_then(|e| e.cmdline()) {
+    // (the `:` command line has its own popup, see draw_cmdline)
+    let prompt = app.prompt.as_ref().and_then(|p| match p.kind {
+        crate::app::PromptKind::Search => Some(format!("/{}▏", p.buf)),
+        crate::app::PromptKind::SaveAs => Some(format!("save as: {}▏", p.buf)),
+        crate::app::PromptKind::Command => None,
+    });
+    let tail = if let Some(p) = prompt {
+        p
+    } else if let Some(c) = app
+        .editor
+        .as_ref()
+        .and_then(|e| e.cmdline())
+        .filter(|c| !c.starts_with(':'))
+    {
         format!("{c}▏")
     } else if let Some(q) = &app.confirm {
         q.question()
@@ -2067,9 +2075,51 @@ pub fn draw(frame: &mut Frame, app: &mut App, rendered: &mut Rendered) {
     if let Some(pager) = &mut app.pager {
         draw_pager(frame, pager);
     }
+    if let Some(p) = &app.prompt
+        && p.kind == crate::app::PromptKind::Command
+    {
+        draw_cmdline(frame, &p.buf);
+    } else if let Some(c) = app
+        .editor
+        .as_ref()
+        .and_then(|e| e.cmdline())
+        .and_then(|c| c.strip_prefix(':'))
+    {
+        draw_cmdline(frame, c); // nvim's own `:` line, same look
+    }
     if let Some(req) = &app.stdin_req {
         draw_stdin(frame, req);
     }
+}
+
+/// The `:` command line: a rounded box in the accent colour a quarter of
+/// the way down, titled and prompted like noice.nvim's cmdline popup.
+fn draw_cmdline(frame: &mut Frame, text: &str) {
+    use ratatui::widgets::{Block, BorderType, Clear, Padding};
+    let area = frame.area();
+    let mut rect = centered(area, area.width.saturating_sub(6).clamp(26, 72), 3);
+    rect.y = (area.y + area.height / 4).min(area.bottom().saturating_sub(rect.height));
+    let accent = Style::new().fg(Color::Cyan);
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .border_style(accent)
+        .title(Line::styled(" Cmdline ", accent).centered())
+        .padding(Padding::horizontal(1));
+    let inner = block.inner(rect);
+    frame.render_widget(Clear, rect);
+    frame.render_widget(block, rect);
+    // keep the tail (and the cursor) inside the box when the line outgrows it
+    let room = (inner.width as usize).saturating_sub(3);
+    let skip = text.chars().count().saturating_sub(room);
+    let tail: String = text.chars().skip(skip).collect();
+    frame.set_cursor_position((inner.x + 2 + tail.width() as u16, inner.y));
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled("› ", accent),
+            Span::raw(tail),
+        ])),
+        inner,
+    );
 }
 
 fn line_chars(line: &Line) -> usize {
@@ -2654,9 +2704,21 @@ pub const HELP: &[(&str, &[(&str, &str)])] = &[
             ("w W", "save / force save"),
             ("S", "save as"),
             ("q", "quit"),
+            (":", "command line (see Commands)"),
             ("L", "view logs"),
             ("D", "debug info for this cell"),
             ("?", "this help"),
+        ],
+    ),
+    (
+        "Commands",
+        &[
+            (":w :w!", "save / even if changed on disk"),
+            (":w\u{a0}file", "save as (:w! file overwrites)"),
+            (":q :q!", "in a cell: leave it / discard edit"),
+            (":q :q! :qa", "notebook: quit / without saving"),
+            (":wq :x", "save, then leave the cell or quit"),
+            (":5", "go to cell 5"),
         ],
     ),
     (
@@ -3513,5 +3575,38 @@ mod tests {
         let kept: Vec<bool> = r.blocks.iter().map(|b| b.rendered).collect();
         // oldest outside the window is 3 (seen 3), then 0 (seen 5): two go
         assert_eq!(kept, [false, true, true, false]);
+    }
+
+    #[test]
+    fn command_line_draws_as_a_titled_popup() {
+        let nb_json = serde_json::json!({
+            "cells": [{"cell_type": "code", "metadata": {}, "source": ["x"], "outputs": []}],
+            "metadata": {}, "nbformat": 4, "nbformat_minor": 5
+        });
+        let path =
+            std::env::temp_dir().join(format!("jotter-cmdline-{}.ipynb", std::process::id()));
+        std::fs::write(&path, nb_json.to_string()).unwrap();
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = crate::app::App::open(path.clone(), None, tx).unwrap();
+        std::fs::remove_file(&path).ok();
+        app.prompt = Some(crate::app::Prompt {
+            kind: crate::app::PromptKind::Command,
+            buf: "wq".into(),
+        });
+        let mut rendered = Rendered::build(&app.notebook, None, Default::default());
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(60, 20)).unwrap();
+        terminal.draw(|f| draw(f, &mut app, &mut rendered)).unwrap();
+        let rows = buffer_rows(&terminal);
+        let top = rows
+            .iter()
+            .position(|r| r.contains("─ Cmdline ─"))
+            .expect("title");
+        assert!(rows[top].trim_start().starts_with('╭'));
+        assert!(rows[top + 1].contains("│ › wq"), "{}", rows[top + 1]);
+        assert!(
+            !rows.last().unwrap().contains("wq"),
+            "not echoed in the status line"
+        );
     }
 }

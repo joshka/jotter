@@ -84,6 +84,8 @@ impl Confirm {
 pub enum PromptKind {
     Search,
     SaveAs,
+    /// `:` command line (vim ex commands, see `App::ex_command`).
+    Command,
 }
 
 /// Scrollable read-only text overlay (Shift+Tab docs).
@@ -471,13 +473,13 @@ impl App {
 
     /// `:w` from inside a cell: commit its text, then save like `w` (`:w!`
     /// like `W`), with the on-disk-change refusal phrased in the editor's terms.
-    fn write_from_editor(&mut self, source: String, force: bool, rendered: &mut Rendered) {
+    fn write_from_editor(&mut self, source: String, force: bool, rendered: &mut Rendered) -> bool {
         self.update_cell_source(source, rendered);
         if !force && self.changed_on_disk() {
             self.message = Some("file changed on disk since open/save — :w! to overwrite".into());
-            return;
+            return false;
         }
-        self.save_notebook(force, rendered);
+        self.save_notebook(force, rendered)
     }
 
     fn changed_on_disk(&self) -> bool {
@@ -872,6 +874,8 @@ impl App {
         };
         match key.code {
             KeyCode::Esc => self.prompt = None,
+            // like vim: backspace on an empty line closes it
+            KeyCode::Backspace if prompt.buf.is_empty() => self.prompt = None,
             KeyCode::Backspace => {
                 prompt.buf.pop();
             }
@@ -891,9 +895,95 @@ impl App {
                             self.prompt = None;
                         }
                     }
+                    PromptKind::Command => {
+                        self.prompt = None;
+                        self.ex_command(&buf, rendered);
+                    }
                 }
             }
             _ => {}
+        }
+    }
+
+    /// A `:` command, vim spellings. Inside a cell they act like the nvim
+    /// backend's: `:w` saves the notebook and keeps editing, `:q` leaves
+    /// the cell, `:wq`/`:x` both. In notebook mode `:q` quits and `:5`
+    /// selects cell 5.
+    fn ex_command(&mut self, cmd: &str, rendered: &mut Rendered) {
+        let cmd = cmd.trim();
+        let (name, arg) = cmd
+            .split_once(char::is_whitespace)
+            .map_or((cmd, ""), |(n, a)| (n, a.trim()));
+        let force = name.ends_with('!');
+        let editing = self.editor.is_some();
+        match (name, arg) {
+            ("", _) => {}
+            ("w" | "w!", "") => {
+                self.ex_write(force, rendered);
+            }
+            ("w" | "w!" | "sav" | "saveas", path) => {
+                if let Some(src) = self.editor.as_ref().map(|e| e.source()) {
+                    self.update_cell_source(src, rendered);
+                }
+                if force {
+                    self.overwrite_armed = Some(expand_tilde(path));
+                }
+                if !self.save_as(path, rendered) {
+                    self.overwrite_armed = None;
+                    self.message = Some(format!("{path} exists — :w! {path} overwrites"));
+                }
+            }
+            ("q" | "q!", "") if editing => self.leave_editor(force, rendered),
+            ("q", "") => self.quit(),
+            ("q!" | "qa!", "") => self.should_quit = true,
+            ("qa", "") => {
+                self.leave_editor(false, rendered);
+                self.quit();
+            }
+            ("wq" | "wq!" | "x" | "x!", "") => {
+                // leave first, so format_on_save also formats this cell
+                self.leave_editor(false, rendered);
+                if self.save_notebook(force, rendered) && !editing {
+                    self.should_quit = true;
+                }
+            }
+            (n, "") if !editing && n.parse::<usize>().is_ok() => {
+                let last = self.notebook.cells.len().saturating_sub(1);
+                self.selected = n.parse::<usize>().unwrap_or(1).saturating_sub(1).min(last);
+            }
+            _ => self.message = Some(format!("not a command: :{cmd}")),
+        }
+    }
+
+    /// `:w`: commit the open cell's text (if any), then save.
+    fn ex_write(&mut self, force: bool, rendered: &mut Rendered) -> bool {
+        match self.editor.as_ref().map(|e| e.source()) {
+            Some(src) => self.write_from_editor(src, force, rendered),
+            None => self.save_notebook(force, rendered),
+        }
+    }
+
+    /// Close the cell editor: commit its text, or (`discard`) drop the edit.
+    fn leave_editor(&mut self, discard: bool, rendered: &mut Rendered) {
+        if !discard {
+            self.commit_editor(rendered);
+            return;
+        }
+        // no commit; reclaim the nvim session, its buffer resyncs on reopen
+        if let Some(ed) = self.editor.take()
+            && let Some(s) = ed.into_session()
+        {
+            self.nvim = Some(s);
+        }
+        self.message = Some("cell edit discarded".into());
+    }
+
+    /// `q`: quit, asking first when there are unsaved changes.
+    fn quit(&mut self) {
+        if self.dirty {
+            self.confirm = Some(Confirm::Quit);
+        } else {
+            self.should_quit = true;
         }
     }
 
@@ -975,8 +1065,18 @@ impl App {
             && key.code == KeyCode::Char('q')
             && key.modifiers.is_empty()
         {
-            self.message =
-                Some("editing cell — Esc exits the editor; then q quits, w saves".into());
+            self.message = Some("editing cell — :q or Esc leaves it, :w saves".into());
+            return;
+        }
+        // the builtin editor has no command line of its own: open jOtter's
+        if editor.is_builtin()
+            && editor.mode() == ModeKind::Normal
+            && key.code == KeyCode::Char(':')
+        {
+            self.prompt = Some(Prompt {
+                kind: PromptKind::Command,
+                buf: String::new(),
+            });
             return;
         }
         let outcome = match editor.input(key) {
@@ -1007,17 +1107,7 @@ impl App {
         if let Some(editor) = &mut self.editor
             && let Some(discard) = editor.take_quit_request()
         {
-            if discard {
-                // :q!/ZQ — no commit; reclaim the session, buffer resyncs on reopen
-                if let Some(ed) = self.editor.take()
-                    && let Some(s) = ed.into_session()
-                {
-                    self.nvim = Some(s);
-                }
-                self.message = Some("cell edit discarded".into());
-            } else {
-                self.commit_editor(rendered);
-            }
+            self.leave_editor(discard, rendered); // :q!/ZQ discard
             return;
         }
         match outcome {
@@ -1070,12 +1160,12 @@ impl App {
                 self.count = Some(count.unwrap_or(0) * 10 + (c as usize - '0' as usize));
             }
             (None, code) => match code {
-                KeyCode::Char('q') => {
-                    if self.dirty {
-                        self.confirm = Some(Confirm::Quit);
-                    } else {
-                        self.should_quit = true;
-                    }
+                KeyCode::Char('q') => self.quit(),
+                KeyCode::Char(':') => {
+                    self.prompt = Some(Prompt {
+                        kind: PromptKind::Command,
+                        buf: String::new(),
+                    })
                 }
                 KeyCode::Char('w') => {
                     self.save_notebook(false, rendered);
@@ -2115,6 +2205,37 @@ pub(super) mod tests {
             app.save_notebook(false, &mut rendered),
             "plain w overwrites after keep-mine"
         );
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn command_line_saves_leaves_and_jumps() {
+        let (mut app, mut r) = one_cell_app("cmdline");
+        let path = app.path.clone();
+        app.disk_mtime = None; // the helper deleted the file: not a disk change
+        let type_cmd = |app: &mut App, r: &mut Rendered, cmd: &str| {
+            app.on_key(key(':'), r);
+            for c in cmd.chars() {
+                app.on_key(key(c), r);
+            }
+            app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), r);
+        };
+        // builtin editor: `:` opens jOtter's command line; :w commits + saves
+        app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), &mut r);
+        app.on_key(key('A'), &mut r);
+        app.on_key(key('y'), &mut r);
+        app.on_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE), &mut r);
+        type_cmd(&mut app, &mut r, "w");
+        assert!(app.editor.is_some(), ":w keeps editing");
+        assert!(!app.dirty, "{:?}", app.message);
+        assert!(std::fs::read_to_string(&path).unwrap().contains("xy"));
+        type_cmd(&mut app, &mut r, "q");
+        assert!(app.editor.is_none(), ":q leaves the cell");
+        assert!(!app.should_quit);
+        type_cmd(&mut app, &mut r, "bogus");
+        assert!(app.message.as_deref().unwrap().contains("not a command"));
+        type_cmd(&mut app, &mut r, "q");
+        assert!(app.should_quit, ":q in notebook mode quits");
         std::fs::remove_file(&path).ok();
     }
 }
