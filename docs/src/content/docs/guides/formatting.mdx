@@ -1,0 +1,84 @@
+---
+title: "Formatting code"
+description: "Format a cell or the whole notebook with ruff, black or any formatter that reads standard input."
+---
+import { Aside } from '@astrojs/starlight/components';
+
+| Key | Does |
+| --- | --- |
+| <kbd>f</kbd> | Format the selected code cell |
+| <kbd>F</kbd> | Format every code cell |
+
+Both work in notebook mode, and each is one step for <kbd>u</kbd> to undo. Markdown and latex cells are never touched. To format every code cell each time you save with <kbd>w</kbd>, <kbd>W</kbd> or `:w`, add this to your [config](/jotter/reference/configuration/):
+
+```toml
+format_on_save = true
+```
+
+Autosaves don't format. The cell you are editing is skipped when you save with `:w` from inside it, so your open buffer never goes out of date.
+
+## How it works
+
+jOtter has no formatter of its own. It runs the [`formatter`](/jotter/reference/configuration/) command from your config, `ruff format -` by default, once per code cell:
+
+- the cell's source goes in on standard input;
+- the formatted source must come out on standard output;
+- a non-zero exit status, or no output at all, counts as a failure.
+
+The command runs through `sh` in the notebook's directory. So pipelines work, and the formatter finds your project's settings (`pyproject.toml`, `ruff.toml`, `.clang-format`, …) as it would on the command line.
+
+A cell the formatter rejects is left exactly as it was, and the status line names the first one with the formatter's error, for example `formatted 3, 1 failed — cell 7: error: Failed to parse at 2:1`.
+
+<Aside type="caution" title="IPython magics">
+Formatters parse a cell as plain source, so a cell with an IPython magic (`%timeit`, `%%time`, `!pip install`) fails to parse and is left unformatted. The rest of the notebook still formats.
+</Aside>
+
+## Other formatters
+
+Any formatter that can read standard input and write standard output works. The formatter has to be installed where jOtter can find it: on your `PATH`, or give the full path, e.g. `.venv/bin/ruff format -`.
+
+### Python
+
+| Formatter | `formatter = …` |
+| --- | --- |
+| [Ruff](https://docs.astral.sh/ruff/formatter/) (default) | `"ruff format -"` |
+| Ruff, also sorting imports | `"ruff check --select I --fix-only --quiet - \| ruff format -"` |
+| [Black](https://black.readthedocs.io/) | `"black -q -"` |
+| [isort](https://pycqa.github.io/isort/) then Black | `"isort -q - \| black -q -"` |
+
+Options go on the command line as usual (`"ruff format --line-length 100 -"`), but a `[tool.ruff]` or `[tool.black]` section in your project's `pyproject.toml` is usually the better place, since it applies outside jOtter too.
+
+### Other kernels
+
+| Language | Formatter | `formatter = …` |
+| --- | --- | --- |
+| R | [styler](https://styler.r-lib.org/) | `'Rscript -e "cat(styler::style_text(readLines(file(\"stdin\"), warn = FALSE)), sep = \"\\n\")"'` |
+| Julia | [JuliaFormatter](https://domluna.github.io/JuliaFormatter.jl/) | `'julia --startup-file=no -e "using JuliaFormatter; print(format_text(read(stdin, String)))"'` |
+| C++ (xeus-cling) | [clang-format](https://clang.llvm.org/docs/ClangFormat.html) | `"clang-format --assume-filename=cell.cpp"` |
+
+The single quotes are TOML literal strings, so the double quotes and backslashes inside reach `sh` unchanged. R and Julia take a moment to start, once per cell, so <kbd>F</kbd> on a long notebook is slower than with Ruff.
+
+<Aside>
+`rustfmt` doesn't fit Rust notebooks (evcxr): it only accepts whole files, and cells are mostly top-level statements like `let x = 1;`, which it rejects.
+</Aside>
+
+### One config, several languages
+
+There is one `formatter` for all notebooks, but jOtter tells it the notebook's language in the `JOTTER_LANGUAGE` environment variable (`python`, `r`, `julia`, `c++`, …; lowercase, from the notebook's metadata). A short script of your own can pick a formatter by it:
+
+```sh
+#!/bin/sh
+# ~/.config/jotter/format — remember: chmod +x
+case "$JOTTER_LANGUAGE" in
+  python) exec ruff format - ;;
+  r)      exec Rscript -e 'cat(styler::style_text(readLines(file("stdin"), warn = FALSE)), sep = "\n")' ;;
+  julia)  exec julia --startup-file=no -e 'using JuliaFormatter; print(format_text(read(stdin, String)))' ;;
+  *)      exec cat ;;  # no formatter: hand the cell back unchanged
+esac
+```
+
+```toml
+formatter = "~/.config/jotter/format"
+```
+
+Pick by language rather than trying formatters one after another: a lot of R is also valid Python (`x<-c(1, 2)` parses as `x < -c(1, 2)`), and Ruff would happily "format" it.

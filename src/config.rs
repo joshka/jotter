@@ -35,6 +35,10 @@ pub struct Config {
     pub signature_help: bool,
     /// Show plots in your terminal's colours: a figure's white background becomes the terminal background and black text and axes become the terminal foreground, while coloured lines keep their hue. Only the display changes; the notebook, its saved outputs and files written with `savefig` keep their original colours. It applies to images with a large white background and no transparency, so photos and figures you styled yourself are left alone. See [outputs](/jotter/guides/outputs/#plots-in-your-terminals-colours).
     pub recolor_plots: bool,
+    /// The command that formats a code cell with `f` (or every code cell with `F`). It gets the cell's source on standard input and must print the formatted source on standard output. It runs through `sh` in the notebook's directory, so pipelines such as `isort - | black -q -` work and your project's formatter settings (`pyproject.toml`, `ruff.toml`) apply. If it fails, for example on a syntax error, the cell is left as it was. See [formatting](/jotter/guides/formatting/) for commands for other formatters and languages.
+    pub formatter: String,
+    /// Format every code cell with `formatter` each time you save with `w`, `W` or `:w`. Autosaves don't format.
+    pub format_on_save: bool,
 }
 
 impl Default for Config {
@@ -51,6 +55,8 @@ impl Default for Config {
             complete_on_dot: true,
             signature_help: true,
             recolor_plots: true,
+            formatter: "ruff format -".into(),
+            format_on_save: false,
         }
     }
 }

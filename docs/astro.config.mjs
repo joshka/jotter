@@ -41,6 +41,7 @@ export default defineConfig({
             'guides/math',
             'guides/markdown',
             'guides/completion',
+            'guides/formatting',
             'guides/navigation',
             'guides/cell-operations',
             'guides/mouse',

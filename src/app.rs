@@ -477,7 +477,7 @@ impl App {
             self.message = Some("file changed on disk since open/save — :w! to overwrite".into());
             return;
         }
-        self.save_notebook(force);
+        self.save_notebook(force, rendered);
     }
 
     fn changed_on_disk(&self) -> bool {
@@ -486,18 +486,24 @@ impl App {
 
     /// Save to `path`; `force` skips the external-modification check.
     /// Returns true on success.
-    fn save_notebook(&mut self, force: bool) -> bool {
+    fn save_notebook(&mut self, force: bool, rendered: &mut Rendered) -> bool {
         if !force && self.changed_on_disk() {
             self.message = Some("file changed on disk since open/save — W to overwrite".into());
             return false;
         }
+        let formatted = crate::config::get()
+            .format_on_save
+            .then(|| self.format_cells(0..self.notebook.cells.len(), rendered));
         match self.notebook.save(&self.path) {
             Ok(()) => {
                 self.dirty = false;
                 self.autosave_pending = false;
                 self.disk_mtime = mtime(&self.path);
                 let _ = std::fs::remove_file(self.autosave_path());
-                self.message = Some(format!("saved {}", self.path.display()));
+                self.message = Some(match formatted {
+                    Some(f) => format!("saved {} · {f}", self.path.display()),
+                    None => format!("saved {}", self.path.display()),
+                });
                 true
             }
             Err(e) => {
@@ -751,7 +757,7 @@ impl App {
             return Action::None;
         }
         if self.prompt.is_some() {
-            self.on_key_prompt(key);
+            self.on_key_prompt(key, rendered);
             return Action::None;
         }
         if let Some(confirm) = self.confirm.take() {
@@ -813,7 +819,7 @@ impl App {
                 // discard; the autosave stays behind as a safety net
                 KeyCode::Char('q') => self.should_quit = true,
                 KeyCode::Char('s') | KeyCode::Char('w') => {
-                    if self.save_notebook(false) {
+                    if self.save_notebook(false, rendered) {
                         self.should_quit = true;
                     }
                 }
@@ -860,7 +866,7 @@ impl App {
     }
 
     /// Keys while a status-line prompt (`/` search, `S` save as) is open.
-    fn on_key_prompt(&mut self, key: KeyEvent) {
+    fn on_key_prompt(&mut self, key: KeyEvent, rendered: &mut Rendered) {
         let Some(prompt) = &mut self.prompt else {
             return;
         };
@@ -881,7 +887,7 @@ impl App {
                         }
                     }
                     PromptKind::SaveAs => {
-                        if self.save_as(&buf) {
+                        if self.save_as(&buf, rendered) {
                             self.prompt = None;
                         }
                     }
@@ -893,7 +899,7 @@ impl App {
 
     /// Save under a new path and continue editing that file. Returns false
     /// while waiting for a second Enter to overwrite an existing file.
-    fn save_as(&mut self, typed: &str) -> bool {
+    fn save_as(&mut self, typed: &str, rendered: &mut Rendered) -> bool {
         let target = expand_tilde(typed.trim());
         if target.as_os_str().is_empty() {
             return true;
@@ -910,7 +916,7 @@ impl App {
         self.overwrite_armed = None;
         let old_side = self.autosave_path();
         let old = std::mem::replace(&mut self.path, target);
-        if self.save_notebook(true) {
+        if self.save_notebook(true, rendered) {
             if self.autosave_path() != old_side {
                 let _ = std::fs::remove_file(old_side);
             }
@@ -1072,10 +1078,17 @@ impl App {
                     }
                 }
                 KeyCode::Char('w') => {
-                    self.save_notebook(false);
+                    self.save_notebook(false, rendered);
                 }
                 KeyCode::Char('W') => {
-                    self.save_notebook(true);
+                    self.save_notebook(true, rendered);
+                }
+                KeyCode::Char('f') => {
+                    self.message =
+                        Some(self.format_cells(self.selected..self.selected + 1, rendered))
+                }
+                KeyCode::Char('F') => {
+                    self.message = Some(self.format_cells(0..self.notebook.cells.len(), rendered))
                 }
                 KeyCode::Char('S') => {
                     self.overwrite_armed = None;
@@ -2099,7 +2112,7 @@ pub(super) mod tests {
         app.check_disk(&mut rendered);
         assert!(app.confirm.is_none(), "mtime accepted, no re-prompt");
         assert!(
-            app.save_notebook(false),
+            app.save_notebook(false, &mut rendered),
             "plain w overwrites after keep-mine"
         );
         std::fs::remove_file(&path).ok();

@@ -253,6 +253,49 @@ impl App {
         self.message = Some(format!("cleared {n} cell output(s) (u undoes)"));
     }
 
+    /// Pipe each code cell in `range` through the configured `formatter`, as
+    /// one undo step. Skips the cell open in the editor (its buffer would go
+    /// stale). Returns the status line.
+    pub(super) fn format_cells(
+        &mut self,
+        range: std::ops::Range<usize>,
+        rendered: &mut Rendered,
+    ) -> String {
+        let cmd = &crate::config::get().formatter;
+        let dir = self.path.parent().filter(|p| !p.as_os_str().is_empty());
+        let lang = crate::ui::notebook_language(&self.notebook);
+        let editing = self.editor.is_some().then_some(self.selected);
+        let selected = self.selected;
+        let (mut ops, mut failed, mut first_err) = (Vec::new(), 0, None);
+        // ponytail: one process per cell, sequential; batch if big notebooks lag
+        for i in range {
+            let Some(cell) = self.notebook.cells.get(i) else {
+                break;
+            };
+            if cell.cell_type != "code" || cell.source.trim().is_empty() || editing == Some(i) {
+                continue;
+            }
+            match run_formatter(cmd, &cell.source, dir, &lang) {
+                Ok(out) if out != cell.source => ops.push(CellOp::SetSource(i, out)),
+                Ok(_) => {}
+                Err(e) => {
+                    failed += 1;
+                    first_err.get_or_insert(format!("cell {}: {e}", i + 1));
+                }
+            }
+        }
+        let n = ops.len();
+        if n > 0 {
+            self.record(CellOp::Batch(ops), rendered);
+            self.selected = selected;
+        }
+        match first_err {
+            Some(e) => format!("formatted {n}, {failed} failed — {e}"),
+            None if n > 0 => format!("formatted {n} cell(s) (u undoes)"),
+            None => "already formatted".into(),
+        }
+    }
+
     /// Cycle cell type: code -> markdown -> raw (rendered as latex) -> code.
     pub(super) fn toggle_type(&mut self, rendered: &mut Rendered) {
         let Some(mut cell) = self.notebook.cells.get(self.selected).cloned() else {
@@ -296,6 +339,54 @@ impl App {
         self.yanked = Some(cell.clone());
         self.message = Some("cell yanked (p pastes) · source on the clipboard".into());
     }
+}
+
+/// Run `cmd` through `sh -c` (so pipelines work) with `source` on stdin
+/// and the kernel language in `$JOTTER_LANGUAGE`;
+/// the formatted text without the trailing newline cells don't carry. Err is
+/// a one-line reason.
+fn run_formatter(
+    cmd: &str,
+    source: &str,
+    dir: Option<&std::path::Path>,
+    lang: &str,
+) -> Result<String, String> {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+    if cmd.trim().is_empty() {
+        return Err("formatter is empty".into());
+    }
+    let mut c = Command::new("sh");
+    c.args(["-c", cmd])
+        .env("JOTTER_LANGUAGE", lang)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    if let Some(d) = dir {
+        c.current_dir(d);
+    }
+    let mut child = c.spawn().map_err(|e| format!("sh: {e}"))?;
+    // write in a thread so a formatter that streams output can't deadlock us
+    let mut stdin = child.stdin.take().expect("piped");
+    let input = source.to_string();
+    let writer = std::thread::spawn(move || stdin.write_all(input.as_bytes()));
+    let out = child.wait_with_output().map_err(|e| format!("sh: {e}"))?;
+    let _ = writer.join();
+    if !out.status.success() {
+        let err = String::from_utf8_lossy(&out.stderr);
+        let line = err
+            .lines()
+            .find(|l| !l.trim().is_empty())
+            .unwrap_or("failed");
+        return Err(line.trim().to_string());
+    }
+    let text = String::from_utf8(out.stdout).map_err(|_| "formatter printed invalid UTF-8")?;
+    let text = text.trim_end_matches('\n');
+    // a failed first stage of a pipeline still exits 0: never blank a cell
+    if text.trim().is_empty() && !source.trim().is_empty() {
+        return Err("formatter printed nothing".into());
+    }
+    Ok(text.to_string())
 }
 
 #[cfg(test)]
@@ -368,5 +459,27 @@ mod tests {
         let cell = &app.notebook.cells[0];
         assert_eq!(cell.source, "x");
         assert_eq!(cell.outputs.as_ref().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn formatter_pipes_stdin_and_reports_failure() {
+        assert_eq!(
+            super::run_formatter("tr a b", "aa\n", None, "python").unwrap(),
+            "bb"
+        );
+        assert!(super::run_formatter("false", "x", None, "python").is_err());
+        assert_eq!(
+            super::run_formatter("echo $JOTTER_LANGUAGE", "x", None, "python").unwrap(),
+            "python"
+        );
+        assert!(super::run_formatter("no-such-formatter-x", "x", None, "python").is_err());
+        assert_eq!(
+            super::run_formatter("tr a b | tr b c", "a", None, "python").unwrap(),
+            "c"
+        );
+        assert!(
+            super::run_formatter("false | cat", "x", None, "python").is_err(),
+            "blank output"
+        );
     }
 }

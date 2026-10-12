@@ -2601,6 +2601,7 @@ pub const HELP: &[(&str, &[(&str, &str)])] = &[
             ("Esc", "leave the editor (normal mode)"),
             ("E", "edit cell in $EDITOR"),
             ("m", "cycle code → markdown → latex"),
+            ("f F", "format cell / all code cells"),
         ],
     ),
     (
