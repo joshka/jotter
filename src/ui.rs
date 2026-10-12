@@ -1528,12 +1528,19 @@ fn type_color(cell: &Cell) -> Color {
     }
 }
 
-/// The gutter bar: bright on the selected cell, dimmed elsewhere. Every
-/// modifier a markdown heading line carries is masked off.
-fn gutter_span(cell: &Cell, selected: bool) -> Span<'static> {
-    let style = Style::new()
-        .fg(type_color(cell))
-        .remove_modifier(Modifier::all());
+/// Colour of a `V` selection: no cell type uses blue.
+const VISUAL_COLOR: Color = Color::Blue;
+
+/// The gutter bar: bright on the selected cell, dimmed elsewhere, in the
+/// selection colour on cells in a `V` selection. Every modifier a markdown
+/// heading line carries is masked off.
+fn gutter_span(cell: &Cell, selected: bool, visual: bool) -> Span<'static> {
+    let color = if visual {
+        VISUAL_COLOR
+    } else {
+        type_color(cell)
+    };
+    let style = Style::new().fg(color).remove_modifier(Modifier::all());
     let style = if selected {
         style.add_modifier(Modifier::BOLD)
     } else {
@@ -1548,6 +1555,7 @@ fn gutter_span(cell: &Cell, selected: bool) -> Span<'static> {
 fn header_line(
     cell: &Cell,
     selected: bool,
+    visual: bool,
     run: Option<bool>,
     editing: bool,
     elapsed: Option<std::time::Duration>,
@@ -1565,7 +1573,11 @@ fn header_line(
         "raw" if is_latex_raw(cell) => "latex".to_string(),
         other => other.to_string(),
     };
-    let color = type_color(cell);
+    let color = if visual {
+        VISUAL_COLOR
+    } else {
+        type_color(cell)
+    };
     let mut label_style = Style::new().fg(color).add_modifier(Modifier::BOLD);
     if selected {
         label_style = label_style.add_modifier(Modifier::REVERSED);
@@ -1576,7 +1588,7 @@ fn header_line(
         Style::new().fg(Color::DarkGray)
     };
     let mut spans = vec![
-        gutter_span(cell, selected),
+        gutter_span(cell, selected, visual),
         Span::styled(format!(" {label} "), label_style),
     ];
     if editing {
@@ -1626,6 +1638,8 @@ pub fn draw(frame: &mut Frame, app: &mut App, rendered: &mut Rendered) {
     // wrapped once per frame (one cell; cached blocks rewrap only on resize).
     // The editor's line count is authoritative for its logical lines.
     let editing_cell = app.editor.as_ref().map(|_| app.selected);
+    let marked = app.sel_range(); // selected cell, or the whole `V` selection
+    let in_visual = |ci: usize| app.visual.is_some() && marked.contains(&ci);
     let editor_src = app.editor.as_ref().map(|e| e.source()).unwrap_or_default();
     let editor_wrap = match (&app.editor, app.notebook.cells.get(app.selected)) {
         (Some(ed), Some(cell)) => {
@@ -1789,7 +1803,8 @@ pub fn draw(frame: &mut Frame, app: &mut App, rendered: &mut Rendered) {
             (
                 header_line(
                     cell,
-                    ci == app.selected,
+                    marked.contains(&ci),
+                    in_visual(ci),
                     run,
                     editing,
                     block.elapsed,
@@ -1813,7 +1828,8 @@ pub fn draw(frame: &mut Frame, app: &mut App, rendered: &mut Rendered) {
                 HitKind::Other // latex raw: no per-row mapping
             };
             let mut row = wrap.rows[b].clone();
-            row.spans.insert(0, gutter_span(cell, ci == app.selected));
+            row.spans
+                .insert(0, gutter_span(cell, marked.contains(&ci), in_visual(ci)));
             (row, kind)
         } else if local <= v.src + v.win_rows {
             let out_row = v.win_start + (local - 1 - v.src);
@@ -1928,6 +1944,7 @@ pub fn draw(frame: &mut Frame, app: &mut App, rendered: &mut Rendered) {
     }
 
     let (mode_label, mode_bg) = match app.editor.as_ref().map(|e| e.mode()) {
+        None if app.visual.is_some() => (" V-LINE ", VISUAL_COLOR),
         None => (" VIEW ", Color::Cyan),
         Some(ModeKind::Insert) => (" INSERT ", Color::Green),
         Some(ModeKind::Visual) => (" VISUAL ", Color::Magenta),
@@ -2685,6 +2702,9 @@ pub const HELP: &[(&str, &[(&str, &str)])] = &[
             ("a b", "new cell after / before"),
             ("dd yy p", "delete / copy / paste cell"),
             ("M", "merge with the cell below"),
+            ("V", "select cells (j k gg G extend)"),
+            ("V: d y J K", "delete / copy / move selection"),
+            ("V: r c f M", "run / clear / format / merge it"),
             ("J K", "move down / up"),
             ("u Ctrl+r", "undo / redo cell operation"),
         ],
@@ -3609,5 +3629,37 @@ mod tests {
             !rows.last().unwrap().contains("wq"),
             "not echoed in the status line"
         );
+    }
+
+    #[test]
+    fn visual_selection_marks_its_cells_in_the_gutter() {
+        let nb_json = serde_json::json!({
+            "cells": (["a", "b", "c"].map(|s| serde_json::json!(
+                {"cell_type": "code", "metadata": {}, "source": [s], "outputs": []}))),
+            "metadata": {}, "nbformat": 4, "nbformat_minor": 5
+        });
+        let path = std::env::temp_dir().join(format!("jotter-vis-{}.ipynb", std::process::id()));
+        std::fs::write(&path, nb_json.to_string()).unwrap();
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = crate::app::App::open(path.clone(), None, tx).unwrap();
+        std::fs::remove_file(&path).ok();
+        app.visual = Some(0);
+        app.selected = 1;
+        let mut rendered = Rendered::build(&app.notebook, None, Default::default());
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(40, 12)).unwrap();
+        terminal.draw(|f| draw(f, &mut app, &mut rendered)).unwrap();
+        let rows = buffer_rows(&terminal);
+        if std::env::var_os("JOTTER_SHOW").is_some() {
+            println!("{}", rows.join("\n"));
+        }
+        // the bar keeps its shape; only its colour marks the selection
+        let fg = |src: &str| {
+            let y = rows.iter().position(|r| r.trim_end() == format!("▌ {src}"));
+            terminal.backend().buffer()[(0, y.unwrap() as u16)].fg
+        };
+        assert_eq!((fg("a"), fg("b")), (VISUAL_COLOR, VISUAL_COLOR));
+        assert_eq!(fg("c"), Color::Cyan, "outside the selection");
+        assert!(rows.last().unwrap().contains("V-LINE"));
     }
 }

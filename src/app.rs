@@ -165,7 +165,10 @@ pub struct App {
     /// `jump_at` == len means "at the newest position, not in the list".
     jumps: Vec<String>,
     jump_at: usize,
-    yanked: Option<Cell>,
+    /// Cells deleted or yanked last (`p` pastes them all).
+    yanked: Vec<Cell>,
+    /// `V`: anchor cell of the visual selection, which runs to `selected`.
+    pub visual: Option<usize>,
     kernel_name: String,
     events_tx: mpsc::UnboundedSender<Event>,
     /// Current kernel launch (Ready/LaunchFailed of older launches are stale).
@@ -348,7 +351,8 @@ impl App {
             pending: None,
             jumps: Vec::new(),
             jump_at: 0,
-            yanked: None,
+            yanked: Vec::new(),
+            visual: None,
             kernel_name,
             events_tx,
             launch: 0,
@@ -672,6 +676,7 @@ impl App {
         if self.editor.is_some() && cell != self.selected {
             self.commit_editor(rendered);
         }
+        self.visual = None;
         self.selected = cell;
         self.manual_scroll = true; // a click never scrolls the view
         match kind {
@@ -1214,13 +1219,72 @@ impl App {
     }
 
     fn on_key_notebook(&mut self, key: KeyEvent, rendered: &mut Rendered) -> Action {
+        if self.visual.is_some()
+            && self.pending.is_none()
+            && self.count.is_none()
+            && self.on_key_visual(key, rendered)
+        {
+            return Action::None;
+        }
+        let action = self.on_key_normal(key, rendered);
+        // motions extend a visual selection; anything else ends it
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        let motion = match key.code {
+            KeyCode::Char('o' | 'i') => ctrl,
+            KeyCode::Char('V' | 'j' | 'k' | 'g' | 'G' | 'n' | 'N' | '0'..='9')
+            | KeyCode::Up
+            | KeyCode::Down
+            | KeyCode::Tab => true,
+            _ => false,
+        };
+        if !motion {
+            self.visual = None;
+        }
+        action
+    }
+
+    /// The cells an operation acts on: the `V` selection, else the selected one.
+    pub fn sel_range(&self) -> std::ops::Range<usize> {
+        let a = self.visual.unwrap_or(self.selected);
+        a.min(self.selected)..a.max(self.selected) + 1
+    }
+
+    /// Operators on a `V` selection. False: not one, handle the key normally.
+    fn on_key_visual(&mut self, key: KeyEvent, rendered: &mut Rendered) -> bool {
+        let r = self.sel_range();
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('V') => {}
+            KeyCode::Char('d' | 'x') => self.delete_cells(r, rendered),
+            KeyCode::Char('y') => self.yank_cells(r),
+            // the selection moves along, so J/K repeat
+            KeyCode::Char('J') => {
+                self.move_cells(r, 1, rendered);
+                return true;
+            }
+            KeyCode::Char('K') => {
+                self.move_cells(r, -1, rendered);
+                return true;
+            }
+            KeyCode::Char('r' | ' ') | KeyCode::Enter => self.run_range(r, rendered),
+            KeyCode::Char('c') if key.modifiers.is_empty() => self.clear_outputs(r, rendered),
+            KeyCode::Char('f') => self.message = Some(self.format_cells(r, rendered)),
+            KeyCode::Char('M') => self.merge_cells(r, rendered),
+            _ => return false,
+        }
+        self.visual = None;
+        true
+    }
+
+    fn on_key_normal(&mut self, key: KeyEvent, rendered: &mut Rendered) -> Action {
         let pending = self.pending.take();
         let count = self.count.take();
         let step = count.unwrap_or(1).max(1);
         let last = self.notebook.cells.len().saturating_sub(1);
         match (pending, key.code) {
-            (Some('d'), KeyCode::Char('d')) => self.delete_cell(rendered),
-            (Some('y'), KeyCode::Char('y')) => self.yank_cell(),
+            (Some('d'), KeyCode::Char('d')) => {
+                self.delete_cells(self.selected..self.selected + 1, rendered)
+            }
+            (Some('y'), KeyCode::Char('y')) => self.yank_cells(self.selected..self.selected + 1),
             (Some('g'), KeyCode::Char('g')) => {
                 self.mark_jump();
                 self.selected = count.map_or(0, |c| c.saturating_sub(1).min(last)) // 5gg like 5G
@@ -1298,7 +1362,7 @@ impl App {
                     self.clear_outputs(self.selected..self.selected + 1, rendered)
                 }
                 KeyCode::Char('C') => self.clear_outputs(0..self.notebook.cells.len(), rendered),
-                KeyCode::Char('M') => self.merge_below(rendered),
+                KeyCode::Char('M') => self.merge_cells(self.selected..self.selected + 2, rendered),
                 KeyCode::Char('o') => {
                     if let Some(b) = rendered.blocks.get_mut(self.selected) {
                         b.collapsed = !b.collapsed;
@@ -1343,14 +1407,14 @@ impl App {
                 // cell ops
                 KeyCode::Char('a') => self.insert_cell(self.selected + 1, rendered),
                 KeyCode::Char('b') => self.insert_cell(self.selected, rendered),
-                KeyCode::Char('p') => {
-                    if let Some(mut cell) = self.yanked.clone() {
-                        cell.extra.insert("id".into(), new_cell_id().into());
-                        self.insert_cell_value(self.selected + 1, cell, rendered);
-                    }
+                KeyCode::Char('p') => self.paste(rendered),
+                KeyCode::Char('V') => self.visual = Some(self.selected),
+                KeyCode::Char('J') => {
+                    self.move_cells(self.selected..self.selected + 1, 1, rendered);
                 }
-                KeyCode::Char('J') => self.move_cell(1, rendered),
-                KeyCode::Char('K') => self.move_cell(-1, rendered),
+                KeyCode::Char('K') => {
+                    self.move_cells(self.selected..self.selected + 1, -1, rendered);
+                }
                 KeyCode::Char('m') => self.toggle_type(rendered),
                 KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     if let Some(k) = &self.kernel {
@@ -2354,5 +2418,43 @@ pub(super) mod tests {
         assert_eq!(app.selected, 2);
         app.on_key(ctrl('o'), &mut r);
         assert_eq!(app.selected, 0);
+    }
+
+    #[test]
+    fn visual_selection_acts_on_every_cell() {
+        let (mut app, mut r) = one_cell_app("visual");
+        for i in 1..5 {
+            app.on_key(key('a'), &mut r);
+            app.notebook.cells[i].source = format!("c{i}");
+        }
+        app.notebook.cells[0].source = "c0".into();
+        let srcs = |app: &App| sources(app).join(",");
+        app.selected = 1;
+        for c in ['V', 'j', 'j'] {
+            app.on_key(key(c), &mut r);
+        }
+        assert_eq!(app.sel_range(), 1..4);
+        app.on_key(key('K'), &mut r); // block up, stays selected
+        assert_eq!(srcs(&app), "c1,c2,c3,c0,c4");
+        assert_eq!(app.sel_range(), 0..3);
+        app.on_key(key('d'), &mut r);
+        assert_eq!(srcs(&app), "c0,c4");
+        assert!(app.visual.is_none(), "an operator ends the selection");
+        app.on_key(key('p'), &mut r);
+        assert_eq!(srcs(&app), "c0,c1,c2,c3,c4");
+        app.on_key(key('u'), &mut r);
+        app.on_key(key('u'), &mut r);
+        app.on_key(key('u'), &mut r);
+        assert_eq!(srcs(&app), "c0,c1,c2,c3,c4", "one undo step each");
+        app.selected = 3;
+        for c in ['V', 'k', 'k', 'M'] {
+            app.on_key(key(c), &mut r);
+        }
+        assert_eq!(srcs(&app), "c0,c1\nc2\nc3,c4");
+        // any other key leaves visual mode without acting
+        for c in ['V', 'j', 'o'] {
+            app.on_key(key(c), &mut r);
+        }
+        assert!(app.visual.is_none());
     }
 }

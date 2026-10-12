@@ -18,13 +18,29 @@ All of these work in notebook mode.
 | <kbd>b</kbd> | New code cell before the selected one |
 | <kbd>d</kbd><kbd>d</kbd> | Delete the selected cell |
 | <kbd>y</kbd><kbd>y</kbd> | Copy the selected cell |
-| <kbd>p</kbd> | Paste the last deleted or copied cell after the selected one |
+| <kbd>p</kbd> | Paste the last deleted or copied cells after the selected one |
 
 <kbd>y</kbd><kbd>y</kbd> also puts the cell's source on the system clipboard (through the terminal's OSC 52 support), so you can paste it into another program.
 
 ## Moving
 
 <kbd>J</kbd> and <kbd>K</kbd> move the selected cell down and up.
+
+## Selecting several cells
+
+<kbd>V</kbd> starts a selection, like vim's visual line mode: <kbd>j</kbd>, <kbd>k</kbd>, <kbd>g</kbd><kbd>g</kbd>, <kbd>G</kbd> and the other motions extend it, and the status line shows `V-LINE`. Then press one key to act on every selected cell:
+
+| Key | Does |
+| --- | --- |
+| <kbd>d</kbd> or <kbd>x</kbd> | Delete them (<kbd>p</kbd> pastes them back, in order) |
+| <kbd>y</kbd> | Copy them; their sources go to the clipboard too |
+| <kbd>J</kbd> <kbd>K</kbd> | Move them down / up as a block; the selection stays, so you can keep moving |
+| <kbd>r</kbd>, <kbd>Space</kbd> or <kbd>Enter</kbd> | Run them, top to bottom |
+| <kbd>c</kbd> | Clear their outputs |
+| <kbd>f</kbd> | [Format](/jotter/guides/formatting/) them |
+| <kbd>M</kbd> | Merge them into one cell |
+
+<kbd>Esc</kbd> or <kbd>V</kbd> ends the selection; so does any other key, which then does its usual thing. Each of these is a single step for <kbd>u</kbd> to undo.
 
 ## Split and merge
 

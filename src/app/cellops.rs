@@ -148,22 +148,63 @@ impl App {
         self.record(CellOp::Insert(at, Box::new(cell)), rendered);
     }
 
-    pub(super) fn delete_cell(&mut self, rendered: &mut Rendered) {
-        if self.notebook.cells.is_empty() {
+    /// `dd`, or `d` on a `V` selection: delete the cells, keeping them for `p`.
+    pub(super) fn delete_cells(&mut self, r: std::ops::Range<usize>, rendered: &mut Rendered) {
+        if r.is_empty() || r.end > self.notebook.cells.len() {
             return;
         }
-        self.yanked = self.notebook.cells.get(self.selected).cloned();
-        self.record(CellOp::Remove(self.selected), rendered);
-        self.message = Some("cell deleted (p pastes it back)".into());
+        self.yanked = self.notebook.cells[r.clone()].to_vec();
+        let n = r.len();
+        self.record(
+            CellOp::Batch((0..n).map(|_| CellOp::Remove(r.start)).collect()),
+            rendered,
+        );
+        self.message = Some(match n {
+            1 => "cell deleted (p pastes it back)".into(),
+            n => format!("{n} cells deleted (p pastes them back)"),
+        });
     }
 
-    pub(super) fn move_cell(&mut self, delta: isize, rendered: &mut Rendered) {
-        let a = self.selected;
-        let b = a as isize + delta;
-        if b < 0 || b as usize >= self.notebook.cells.len() {
-            return;
+    /// `p`: the last deleted or yanked cells, after the selected one, as new
+    /// cells (fresh ids).
+    pub(super) fn paste(&mut self, rendered: &mut Rendered) {
+        let at = (self.selected + 1).min(self.notebook.cells.len());
+        let ops: Vec<CellOp> = (self.yanked.iter().cloned().enumerate())
+            .map(|(k, mut cell)| {
+                cell.extra.insert("id".into(), new_cell_id().into());
+                CellOp::Insert(at + k, Box::new(cell))
+            })
+            .collect();
+        if !ops.is_empty() {
+            self.record(CellOp::Batch(ops), rendered);
         }
-        self.record(CellOp::Swap(a, b as usize), rendered);
+    }
+
+    /// Move the cells in `r` one place down (`delta` 1) or up (-1) as a
+    /// block: the neighbour bubbles across to the other side. The selection
+    /// (and a `V` anchor) moves along. False at the notebook's edge.
+    pub(super) fn move_cells(
+        &mut self,
+        r: std::ops::Range<usize>,
+        delta: isize,
+        rendered: &mut Rendered,
+    ) -> bool {
+        let swaps: Vec<CellOp> = if delta > 0 {
+            if r.end >= self.notebook.cells.len() {
+                return false;
+            }
+            r.clone().rev().map(|i| CellOp::Swap(i, i + 1)).collect()
+        } else {
+            if r.start == 0 {
+                return false;
+            }
+            r.clone().map(|i| CellOp::Swap(i - 1, i)).collect()
+        };
+        let selected = self.selected;
+        self.record(CellOp::Batch(swaps), rendered);
+        self.selected = selected.saturating_add_signed(delta);
+        self.visual = self.visual.map(|v| v.saturating_add_signed(delta));
+        true
     }
 
     /// Split the cell being edited at the editor cursor: text before stays,
@@ -208,26 +249,25 @@ impl App {
         self.message = Some("cell split (u undoes)".into());
     }
 
-    /// `M`: append the next cell's source to this one and remove it
-    /// (JupyterLab's Shift+M). The first cell keeps its type and outputs.
-    pub(super) fn merge_below(&mut self, rendered: &mut Rendered) {
-        let at = self.selected;
-        let (Some(a), Some(b)) = (self.notebook.cells.get(at), self.notebook.cells.get(at + 1))
-        else {
+    /// `M`: merge the cells in `r` into the first (JupyterLab's Shift+M),
+    /// which keeps its type and outputs. Empty sources add no blank line.
+    pub(super) fn merge_cells(&mut self, r: std::ops::Range<usize>, rendered: &mut Rendered) {
+        if r.len() < 2 || r.end > self.notebook.cells.len() {
             self.message = Some("no cell below to merge".into());
             return;
-        };
-        let merged = match (a.source.is_empty(), b.source.is_empty()) {
-            (_, true) => a.source.clone(),
-            (true, false) => b.source.clone(),
-            _ => format!("{}\n{}", a.source, b.source),
-        };
-        self.record(
-            CellOp::Batch(vec![CellOp::SetSource(at, merged), CellOp::Remove(at + 1)]),
-            rendered,
-        );
-        self.selected = at;
-        self.message = Some("merged with the cell below (u undoes)".into());
+        }
+        let merged = self.notebook.cells[r.clone()]
+            .iter()
+            .map(|c| c.source.as_str())
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let n = r.len();
+        let mut ops = vec![CellOp::SetSource(r.start, merged)];
+        ops.extend((1..n).map(|_| CellOp::Remove(r.start + 1)));
+        self.record(CellOp::Batch(ops), rendered);
+        self.selected = r.start;
+        self.message = Some(format!("merged {n} cells (u undoes)"));
     }
 
     /// `c`/`C`: clear outputs + execution counts of the code cells in `range`.
@@ -329,15 +369,24 @@ impl App {
         self.record(CellOp::SetCell(self.selected, Box::new(cell)), rendered);
     }
 
-    /// `yy`: the cell into the paste register (`p`) and its source onto the
-    /// system clipboard via OSC 52.
-    pub(super) fn yank_cell(&mut self) {
-        let Some(cell) = self.notebook.cells.get(self.selected) else {
+    /// `yy`, or `y` on a `V` selection: the cells into the paste register
+    /// (`p`) and their sources onto the system clipboard via OSC 52.
+    pub(super) fn yank_cells(&mut self, r: std::ops::Range<usize>) {
+        let Some(cells) = self.notebook.cells.get(r) else {
             return;
         };
-        osc52(&cell.source);
-        self.yanked = Some(cell.clone());
-        self.message = Some("cell yanked (p pastes) · source on the clipboard".into());
+        osc52(
+            &cells
+                .iter()
+                .map(|c| c.source.as_str())
+                .collect::<Vec<_>>()
+                .join("\n\n"),
+        );
+        self.yanked = cells.to_vec();
+        self.message = Some(match cells.len() {
+            1 => "cell yanked (p pastes) · source on the clipboard".into(),
+            n => format!("{n} cells yanked (p pastes) · sources on the clipboard"),
+        });
     }
 }
 
@@ -416,7 +465,7 @@ mod tests {
         assert_eq!(sources(&app), ["a = 1", "b = 2"]);
         // merge back
         app.selected = 0;
-        app.merge_below(&mut r);
+        app.merge_cells(app.selected..app.selected + 2, &mut r);
         assert_eq!(sources(&app), ["a = 1\nb = 2"]);
         assert_eq!(r.blocks.len(), 1);
         // clear outputs, undo restores them, redo clears again
