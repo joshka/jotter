@@ -1,4 +1,4 @@
-# Outputs: type a plot, run it, zoom into the figure with z.
+# Outputs: type a plot, run it, zoom into the figure with zi.
 send "jotter plots.ipynb"
 key enter
 wait-for "○ idle"
@@ -17,7 +17,7 @@ pause 400ms
 key shift+enter
 settle
 pause 1500ms
-key z
+key z i
 pause 2sec
 key escape
 pause 1sec

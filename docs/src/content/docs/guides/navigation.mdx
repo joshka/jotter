@@ -16,6 +16,7 @@ import Clip from '../../../components/Clip.astro';
 | <kbd>g</kbd><kbd>g</kbd> <kbd>G</kbd> | First / last cell |
 | <kbd>5</kbd><kbd>G</kbd>, `:5` | Go to cell 5 |
 | <kbd>Ctrl</kbd>+<kbd>o</kbd> <kbd>Ctrl</kbd>+<kbd>i</kbd> | Jump back / forward |
+| <kbd>z</kbd><kbd>t</kbd> <kbd>z</kbd><kbd>z</kbd> <kbd>z</kbd><kbd>b</kbd> | Scroll so the selected cell is at the top / middle / bottom of the screen |
 | mouse click | Select a cell |
 | mouse wheel | Scroll the notebook |
 
@@ -24,6 +25,8 @@ import Clip from '../../../components/Clip.astro';
 As in vim, the bigger moves are *jumps*: <kbd>g</kbd><kbd>g</kbd>, <kbd>G</kbd>, <kbd>5</kbd><kbd>G</kbd>, `:5`, and going to a search match with <kbd>/</kbd>, <kbd>n</kbd> or <kbd>N</kbd>. jOtter remembers the cell you jumped from, so <kbd>Ctrl</kbd>+<kbd>o</kbd> takes you back there, and further back through earlier jumps. <kbd>Ctrl</kbd>+<kbd>i</kbd> goes forward again. Stepping with <kbd>j</kbd> and <kbd>k</kbd> isn't a jump. The list follows cells, not positions: after moving or inserting cells, <kbd>Ctrl</kbd>+<kbd>o</kbd> still finds the cell you were on, and skips cells you deleted.
 
 Most terminals send <kbd>Ctrl</kbd>+<kbd>i</kbd> as <kbd>Tab</kbd>, so <kbd>Tab</kbd> jumps forward too.
+
+<kbd>z</kbd><kbd>t</kbd>, <kbd>z</kbd><kbd>z</kbd> and <kbd>z</kbd><kbd>b</kbd> work as in vim, on the whole cell instead of the cursor line. A cell taller than the screen always shows its top.
 
 The view scrolls to keep the selected cell visible. Scrolling with the wheel doesn't move the selection. If the wheel is over a long output, it scrolls that output first; see [Outputs](/jotter/guides/outputs/#long-outputs).
 

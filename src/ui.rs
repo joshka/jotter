@@ -3,7 +3,7 @@
 //! renders live from the editor buffer. Images render as kitty/sixel graphics
 //! into blank placeholder lines reserved in the text flow.
 
-use crate::app::App;
+use crate::app::{Align, App};
 use crate::notebook::{Cell, Notebook, join_multiline};
 use crate::nvim::ModeKind;
 use ansi_to_tui::IntoText;
@@ -1710,6 +1710,7 @@ pub fn draw(frame: &mut Frame, app: &mut App, rendered: &mut Rendered) {
     let n = app.notebook.cells.len();
     let (mut starts, mut heights) = (Vec::with_capacity(n), Vec::with_capacity(n));
     let mut total;
+    let align = app.align.take();
     loop {
         heights.clear();
         heights.extend((0..n).map(|i| 1 + view(rendered, i).body() + 1)); // prompt + body + separator
@@ -1749,6 +1750,15 @@ pub fn draw(frame: &mut Frame, app: &mut App, rendered: &mut Rendered) {
         } else {
             let sel_start = starts[app.selected];
             let sel_end = sel_start + heights[app.selected] - 1;
+            // zt/zz/zb; a cell taller than the screen still shows its top
+            match align {
+                Some(Align::Top) => app.scroll = sel_start,
+                Some(Align::Middle) => {
+                    app.scroll = ((sel_start + sel_end) / 2).saturating_sub(height / 2)
+                }
+                Some(Align::Bottom) => app.scroll = sel_end.saturating_sub(height),
+                None => {}
+            }
             if sel_end > app.scroll + height {
                 app.scroll = sel_end - height;
             }
@@ -2658,6 +2668,7 @@ pub const HELP: &[(&str, &[(&str, &str)])] = &[
             ("gg G", "first / last cell"),
             ("Ctrl+o Ctrl+i", "jump back / forward (also Tab)"),
             ("5G", "go to cell 5"),
+            ("zt zz zb", "scroll: cell at top / middle / bottom"),
             ("/ n N", "search sources / next / previous"),
         ],
     ),
@@ -2715,7 +2726,7 @@ pub const HELP: &[(&str, &[(&str, &str)])] = &[
             ("o", "hide / show output"),
             ("c C", "clear output / all outputs"),
             ("[ ]", "scroll long output"),
-            ("z", "zoom image fullscreen"),
+            ("zi", "zoom image fullscreen"),
             ("Z", "toggle native-size images"),
         ],
     ),
@@ -3661,5 +3672,44 @@ mod tests {
         assert_eq!((fg("a"), fg("b")), (VISUAL_COLOR, VISUAL_COLOR));
         assert_eq!(fg("c"), Color::Cyan, "outside the selection");
         assert!(rows.last().unwrap().contains("V-LINE"));
+    }
+
+    #[test]
+    fn zt_zz_zb_place_the_selected_cell() {
+        let cells: Vec<_> = (0..30)
+            .map(|i| serde_json::json!({"cell_type": "code", "metadata": {}, "source": [format!("c{i}")], "outputs": []}))
+            .collect();
+        let nb_json =
+            serde_json::json!({"cells": cells, "metadata": {}, "nbformat": 4, "nbformat_minor": 5});
+        let path = std::env::temp_dir().join(format!("jotter-zt-{}.ipynb", std::process::id()));
+        std::fs::write(&path, nb_json.to_string()).unwrap();
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = crate::app::App::open(path.clone(), None, tx).unwrap();
+        std::fs::remove_file(&path).ok();
+        let mut rendered = Rendered::build(&app.notebook, None, Default::default());
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(30, 13)).unwrap();
+        app.selected = 15;
+        let mut row_of_c15 = |app: &mut crate::app::App, keys: &str| {
+            for c in keys.chars() {
+                let k = crossterm::event::KeyEvent::new(
+                    crossterm::event::KeyCode::Char(c),
+                    crossterm::event::KeyModifiers::NONE,
+                );
+                app.on_key(k, &mut rendered);
+            }
+            terminal.draw(|f| draw(f, app, &mut rendered)).unwrap();
+            let rows = buffer_rows(&terminal);
+            rows.iter().position(|r| r.trim_end() == "▌ c15").unwrap()
+        };
+        // 12 body rows; each cell is header + source + separator
+        assert_eq!(row_of_c15(&mut app, "zt"), 1, "header on the top row");
+        assert_eq!(row_of_c15(&mut app, "zb"), 11, "source on the bottom row");
+        assert_eq!(row_of_c15(&mut app, "zz"), 6, "middle");
+        assert_eq!(
+            row_of_c15(&mut app, "j"),
+            6,
+            "the view stays until it must move"
+        );
     }
 }

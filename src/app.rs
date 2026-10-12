@@ -88,6 +88,14 @@ pub enum PromptKind {
     Command,
 }
 
+/// Screen position for the selected cell (vim's zt / zz / zb).
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Align {
+    Top,
+    Middle,
+    Bottom,
+}
+
 /// Scrollable read-only text overlay (Shift+Tab docs).
 pub struct Pager {
     pub title: String,
@@ -152,6 +160,8 @@ pub struct App {
     pub body: Rect,
     /// View was wheel-scrolled: draw must not snap back to the selection.
     pub manual_scroll: bool,
+    /// `zz`/`zt`/`zb`: where the next draw puts the selected cell.
+    pub align: Option<Align>,
     /// Keybinding cheatsheet overlay is open.
     pub show_help: bool,
     /// Total rendered lines of the last draw (scroll bound).
@@ -344,6 +354,7 @@ impl App {
             hit: Vec::new(),
             body: Rect::default(),
             manual_scroll: false,
+            align: None,
             show_help: false,
             content_lines: 0,
             last_click: None,
@@ -1285,6 +1296,20 @@ impl App {
                 self.delete_cells(self.selected..self.selected + 1, rendered)
             }
             (Some('y'), KeyCode::Char('y')) => self.yank_cells(self.selected..self.selected + 1),
+            (Some('z'), KeyCode::Char('t')) => self.align = Some(Align::Top),
+            (Some('z'), KeyCode::Char('z')) => self.align = Some(Align::Middle),
+            (Some('z'), KeyCode::Char('b')) => self.align = Some(Align::Bottom),
+            (Some('z'), KeyCode::Char('i')) => {
+                self.zoom = self
+                    .notebook
+                    .cells
+                    .get(self.selected)
+                    .and_then(|c| rendered.zoom_image(c, self.body));
+                self.message = Some(match self.zoom {
+                    Some(_) => "zoom — any key closes".into(),
+                    None => "no image output in this cell".into(),
+                });
+            }
             (Some('g'), KeyCode::Char('g')) => {
                 self.mark_jump();
                 self.selected = count.map_or(0, |c| c.saturating_sub(1).min(last)) // 5gg like 5G
@@ -1437,17 +1462,7 @@ impl App {
                     self.debug = Some(text);
                     self.message = Some("debug info copied to clipboard".into());
                 }
-                KeyCode::Char('z') => {
-                    self.zoom = self
-                        .notebook
-                        .cells
-                        .get(self.selected)
-                        .and_then(|c| rendered.zoom_image(c, self.body));
-                    self.message = Some(match self.zoom {
-                        Some(_) => "zoom — any key closes".into(),
-                        None => "no image output in this cell".into(),
-                    });
-                }
+                KeyCode::Char('z') => self.pending = Some('z'),
                 KeyCode::Char('Z') => {
                     if let Some(cell) = self.notebook.cells.get(self.selected) {
                         let native = rendered.toggle_full_images(self.selected, cell);
