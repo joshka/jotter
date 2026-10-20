@@ -755,6 +755,28 @@ impl App {
         action
     }
 
+    /// Bracketed paste, whole: a key per character would run each one as a
+    /// command outside the editor, and cost an nvim round trip each inside.
+    pub fn on_paste(&mut self, text: String) {
+        let text = text.replace("\r\n", "\n").replace('\r', "\n");
+        self.message = None;
+        if let Some(req) = &mut self.stdin_req {
+            req.buf.push_str(text.lines().next().unwrap_or(""));
+        } else if let Some(p) = &mut self.prompt {
+            p.buf.push_str(text.lines().next().unwrap_or(""));
+        } else if let Some(editor) = &mut self.editor {
+            self.completion = None;
+            if let Err(e) = editor.paste(&text) {
+                // nvim died: salvage the text into the builtin editor
+                let source = editor.source();
+                self.editor = Some(Backend::Builtin(Editor::new(&source)));
+                self.message = Some(format!("nvim backend lost ({e:#}) — builtin editor"));
+            }
+        } else {
+            self.message = Some("paste ignored outside a cell (i or A edits it)".into());
+        }
+    }
+
     fn on_key_inner(&mut self, key: KeyEvent, rendered: &mut Rendered) -> Action {
         self.message = None;
         self.manual_scroll = false; // keyboard nav re-follows the selection
@@ -2424,6 +2446,34 @@ pub(super) mod tests {
             "plain w overwrites after keep-mine"
         );
         std::fs::remove_file(&path).ok();
+    }
+
+    /// A paste lands in the cell being edited and nowhere else.
+    #[test]
+    fn paste_goes_into_the_editor_only() {
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let mut app = App::open(PathBuf::new(), None, tx).unwrap();
+        let mut r = Rendered::build(&app.notebook, None, Default::default());
+        let before = app.notebook.cells.len();
+        app.on_paste("arst\n".into()); // would insert and retype cells as keys
+        assert_eq!(app.notebook.cells.len(), before);
+        assert!(
+            app.message
+                .as_deref()
+                .unwrap_or("")
+                .contains("paste ignored")
+        );
+
+        app.on_key(
+            KeyEvent::new(KeyCode::Char('A'), KeyModifiers::NONE),
+            &mut r,
+        );
+        app.on_paste("x = 1\r\ny = 2".into());
+        let esc = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
+        app.on_key(esc, &mut r);
+        app.on_key(esc, &mut r);
+        assert!(app.editor.is_none());
+        assert_eq!(app.notebook.cells[app.selected].source, "x = 1\ny = 2");
     }
 
     /// `jotter` without a file: w has nowhere to write, `:w name` names it.

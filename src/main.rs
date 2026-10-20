@@ -15,9 +15,9 @@ use app::{Action, App};
 use clap::{CommandFactory, Parser};
 use crossterm::cursor::SetCursorStyle;
 use crossterm::event::{
-    DisableFocusChange, DisableMouseCapture, EnableFocusChange, EnableMouseCapture, Event,
-    EventStream, KeyEventKind, KeyboardEnhancementFlags, PopKeyboardEnhancementFlags,
-    PushKeyboardEnhancementFlags,
+    DisableBracketedPaste, DisableFocusChange, DisableMouseCapture, EnableBracketedPaste,
+    EnableFocusChange, EnableMouseCapture, Event, EventStream, KeyEventKind,
+    KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
 };
 use futures::StreamExt;
 use std::path::PathBuf;
@@ -63,11 +63,21 @@ fn enter_extras(enhanced: bool) {
             PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
         );
     }
-    let _ = crossterm::execute!(std::io::stdout(), EnableMouseCapture, EnableFocusChange);
+    let _ = crossterm::execute!(
+        std::io::stdout(),
+        EnableMouseCapture,
+        EnableFocusChange,
+        EnableBracketedPaste
+    );
 }
 
 fn leave_extras(enhanced: bool) {
-    let _ = crossterm::execute!(std::io::stdout(), DisableMouseCapture, DisableFocusChange);
+    let _ = crossterm::execute!(
+        std::io::stdout(),
+        DisableMouseCapture,
+        DisableFocusChange,
+        DisableBracketedPaste
+    );
     if enhanced {
         let _ = crossterm::execute!(std::io::stdout(), PopKeyboardEnhancementFlags);
     }
@@ -180,20 +190,25 @@ async fn run(
         }
         terminal.draw(|frame| ui::draw(frame, app, rendered))?;
         tokio::select! {
-            maybe_event = term_events.next() => match maybe_event {
-                Some(Ok(Event::Key(key))) if key.kind == KeyEventKind::Press => {
-                    if let Action::ExternalEdit = app.on_key(key, rendered) {
+            maybe_event = term_events.next() => {
+                let Some(event) = maybe_event else { break };
+                let mut event = event?;
+                // Keys that arrived together (a paste, a macro, repeat
+                // outrunning the frame rate) are all handled before the one
+                // redraw; a frame per key would cost a full redraw each.
+                // Mouse and other events still draw at once: mouse hits
+                // resolve against the last frame.
+                loop {
+                    let is_key = matches!(event, Event::Key(_) | Event::Paste(_));
+                    if let Action::ExternalEdit = on_term_event(app, rendered, event) {
                         external_edit(terminal, app, rendered, enhanced);
+                        break;
                     }
+                    if !is_key || app.should_quit || !crossterm::event::poll(std::time::Duration::ZERO)? {
+                        break;
+                    }
+                    event = crossterm::event::read()?;
                 }
-                Some(Ok(Event::Mouse(mouse))) => app.on_mouse(mouse, rendered),
-                // reflow happens on redraw; images need a rebuild if the font changed
-                Some(Ok(Event::Resize(..))) => rendered.on_resize(&app.notebook),
-                // nvim-autoread-style external change detection
-                Some(Ok(Event::FocusGained)) => app.check_disk(rendered),
-                Some(Ok(_)) => {} // focus etc. -> redraw on next loop
-                Some(Err(e)) => return Err(e.into()),
-                None => break,
             },
             Some(event) = kernel_events.recv() => {
                 app.apply_kernel_event(event, rendered);
@@ -215,6 +230,20 @@ async fn run(
         }
     }
     Ok(())
+}
+
+fn on_term_event(app: &mut App, rendered: &mut Rendered, event: Event) -> Action {
+    match event {
+        Event::Key(key) if key.kind == KeyEventKind::Press => return app.on_key(key, rendered),
+        Event::Paste(text) => app.on_paste(text),
+        Event::Mouse(mouse) => app.on_mouse(mouse, rendered),
+        // reflow happens on redraw; images need a rebuild if the font changed
+        Event::Resize(..) => rendered.on_resize(&app.notebook),
+        // nvim-autoread-style external change detection
+        Event::FocusGained => app.check_disk(rendered),
+        _ => {} // focus etc. -> redraw on next loop
+    }
+    Action::None
 }
 
 /// Suspend the TUI, open the selected cell in $VISUAL/$EDITOR, read it back.

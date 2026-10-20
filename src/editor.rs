@@ -96,6 +96,24 @@ impl Editor {
         self.clamp();
     }
 
+    /// Bracketed paste: the text goes in at the cursor as one undo step,
+    /// cursor after it, mode unchanged.
+    pub fn paste(&mut self, text: &str) {
+        self.snapshot();
+        let (row, col) = self.cursor;
+        let b = bidx(&self.lines[row], col);
+        let rest = self.lines[row].split_off(b);
+        let mut parts = text.split('\n');
+        self.lines[row].push_str(parts.next().unwrap_or(""));
+        for (i, part) in parts.enumerate() {
+            self.lines.insert(row + 1 + i, part.to_string());
+        }
+        let last = row + text.matches('\n').count();
+        self.cursor = (last, clen(&self.lines[last]));
+        self.lines[last].push_str(&rest);
+        self.clamp();
+    }
+
     fn line(&self) -> &str {
         &self.lines[self.cursor.0]
     }
@@ -398,6 +416,19 @@ mod tests {
     }
     fn code(c: KeyCode) -> KeyEvent {
         KeyEvent::new(c, KeyModifiers::NONE)
+    }
+
+    #[test]
+    fn paste_inserts_at_the_cursor_as_one_undo_step() {
+        let mut e = Editor::new("ab\ncd");
+        e.input(key('i'));
+        e.input(code(KeyCode::Right));
+        e.paste("1\n22");
+        assert_eq!(e.source(), "a1\n22b\ncd");
+        assert_eq!(e.cursor, (1, 2));
+        e.input(code(KeyCode::Esc));
+        e.input(key('u'));
+        assert_eq!(e.source(), "ab\ncd");
     }
 
     #[test]

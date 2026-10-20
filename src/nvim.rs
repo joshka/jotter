@@ -143,6 +143,22 @@ impl Backend {
         }
     }
 
+    /// Bracketed paste: the whole text in one step (one nvim round trip
+    /// instead of two per character, and plugins see one change).
+    pub fn paste(&mut self, text: &str) -> Result<()> {
+        match self {
+            Backend::Builtin(e) => {
+                e.paste(text);
+                Ok(())
+            }
+            Backend::Nvim(c) => {
+                c.session
+                    .req("nvim_paste", vec![text.into(), true.into(), (-1i64).into()])?;
+                c.readback()
+            }
+        }
+    }
+
     /// Visual selection for rendering: (kind, anchor, cursor) in char coords.
     #[allow(clippy::type_complexity)] // two (row, col) pairs, not worth a type
     pub fn visual(&self) -> Option<(ModeKind, (usize, usize), (usize, usize))> {
