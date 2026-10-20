@@ -1501,12 +1501,18 @@ fn output_lines(output: &Value) -> Vec<Line<'static>> {
         Ok(t) => t
             .lines
             .into_iter()
-            .map(|l| {
+            .map(|mut l| {
                 if l.spans.iter().all(|s| s.style == Style::default()) {
-                    l.style(style)
-                } else {
-                    l
+                    return l.style(style);
                 }
+                // IPython < 9.14 marks a traceback's error range with only
+                // bg:ansiyellow, leaving syntax colours unreadable on it
+                for s in &mut l.spans {
+                    if matches!(s.style.bg, Some(Color::Yellow | Color::LightYellow)) {
+                        s.style.fg = Some(Color::Black);
+                    }
+                }
+                l
             })
             .collect(),
         Err(_) => text
@@ -2942,6 +2948,17 @@ mod tests {
 
     // 1x1 transparent png
     const PNG: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGNgAAIAAAUAAXpeqz8AAAAASUVORK5CYII=";
+
+    /// IPython < 9.14 highlights the error range as syntax colours on yellow.
+    #[test]
+    fn traceback_highlight_is_black_on_yellow() {
+        let out = serde_json::json!({"output_type": "error",
+            "traceback": ["x = \x1b[38;5;255;43mf\x1b[38;5;70;43m(a)\x1b[39;49m"]});
+        let line = &output_lines(&out)[0];
+        let hl: Vec<_> = line.spans.iter().filter(|s| s.style.bg.is_some()).collect();
+        assert!(!hl.is_empty());
+        assert!(hl.iter().all(|s| s.style.fg == Some(Color::Black)), "{line:?}");
+    }
 
     /// Invalid code (`f"{}"`, `np.(`) gets the theme's `invalid` style: text in
     /// the background colour on a coloured background. It must stay visible.
