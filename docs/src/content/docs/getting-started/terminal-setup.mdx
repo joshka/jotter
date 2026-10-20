@@ -18,9 +18,9 @@ jOtter detects both when it starts and needs no configuration. See the [terminal
 
 ## Other terminals
 
-**Images:** jOtter uses the best protocol your terminal offers: kitty graphics, then sixel, then the iTerm2 protocol, then half-blocks. Ghostty uses kitty graphics, foot uses sixel and WezTerm the iTerm2 protocol; all of them show sharp images. Alacritty has no image protocol.
+**Images:** jOtter uses the best protocol your terminal offers: kitty graphics, then sixel, then the iTerm2 protocol, then half-blocks. Ghostty uses kitty graphics, foot uses sixel and WezTerm the iTerm2 protocol; all of them show sharp images. xterm does sixel when started as a VT340 (`xterm -ti vt340`). Alacritty and GNOME Terminal have no image protocol, and Konsole's sixel and kitty implementations are incomplete in ways jOtter's image library can't use, so these three get half-blocks.
 
-**Keys:** kitty, Ghostty, foot and Alacritty speak the kitty keyboard protocol. WezTerm does with `enable_kitty_keyboard = true` in its config. Without it, use these instead:
+**Keys:** kitty, Ghostty, foot, Alacritty and Konsole speak the kitty keyboard protocol. WezTerm does with `enable_kitty_keyboard = true` in its config. GNOME Terminal and xterm don't. Without it, use these instead:
 
 | Instead of | Use |
 | --- | --- |

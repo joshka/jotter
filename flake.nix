@@ -43,7 +43,9 @@
           packages = with pkgs; [
             rustc cargo nodejs_22 nushell
             sway wf-recorder grim ffmpeg kitty wlrctl neovim wtype
-            foot alacritty wezterm ghostty tmux # the terminal gallery
+            # the terminal gallery (scenes/terminals.nu); xterm needs Xwayland,
+            # gnome-terminal a session bus
+            foot alacritty wezterm ghostty tmux kdePackages.konsole gnome-terminal xterm xwayland dbus
             (python3.withPackages (p: with p; [ ipykernel numpy matplotlib tqdm sympy ]))
           ];
           # software OpenGL from this Mesa for kitty, also where the host has
@@ -52,6 +54,9 @@
           LIBGL_DRIVERS_PATH = "${pkgs.mesa}/lib/dri";
           GBM_BACKENDS_PATH = "${pkgs.mesa}/lib/gbm";
           LIBGL_ALWAYS_SOFTWARE = "1";
+          # the host's LD_LIBRARY_PATH (home-manager sets one for audio apps)
+          # would override the pinned libraries: ffmpeg then fails to load
+          shellHook = "unset LD_LIBRARY_PATH";
           # the speed comparison (scenes/bench-editors.nu); its own Python,
           # off PATH so its `jupyter` can't shadow the kernel environment
           EUPORIE = "${pkgs.python313Packages.euporie}/bin/euporie-notebook";

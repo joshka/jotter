@@ -129,7 +129,17 @@ def record-scene [name: string, repo: string, out: string, python_prefix: string
     stop $sway
     rm -rf $work
     if $result == null {
-        rm -rf $run
+        # daemons a scene's session bus started (gvfs, portals, dconf) and a
+        # tmux server outlive it and hold FUSE mounts in the run dir: stop
+        # them and unmount before removing (grep exits 2 on unreadable
+        # environs, hence `complete`)
+        let envs = glob /proc/[0-9]*/environ
+        let mine = ^grep -lsz $"XDG_RUNTIME_DIR=($run)" ...$envs | complete | get stdout | lines
+        for e in $mine { ^kill ($e | path dirname | path basename) | complete | ignore }
+        sleep 500ms
+        let mounts = ^grep -o $"($run)[^ ]*" /proc/mounts | complete | get stdout | lines
+        for m in $mounts { ^fusermount -u $m | complete | ignore }
+        try { rm -rf $run } catch { print -e $"   could not remove ($run)" }
     }
     $result
 }

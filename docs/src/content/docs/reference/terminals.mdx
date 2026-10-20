@@ -15,9 +15,11 @@ jOtter works in any terminal with true colour and mouse support, which today is 
 | [WezTerm](https://wezfurlong.org/wezterm/) | iTerm2 protocol | with `enable_kitty_keyboard = true` | |
 | [Alacritty](https://alacritty.org) | half-blocks | yes | No image protocol. |
 | tmux (inside kitty) | the outer terminal's, with `allow-passthrough on` | no | tmux doesn't forward the keyboard protocol. |
-| Konsole, GNOME Terminal, xterm | not tested yet | not tested yet | |
+| [Konsole](https://konsole.kde.org) | half-blocks | yes | Has sixel and part of the kitty protocol, but jOtter's image library skips both there as incomplete. |
+| [GNOME Terminal](https://gitlab.gnome.org/GNOME/gnome-terminal) | half-blocks | no | Offers no image protocol (VTE 0.84). |
+| [xterm](https://invisible-island.net/xterm/) | sixel as a VT340 | no | `xterm -ti vt340` (or `xterm*decTerminalID: vt340`); half-blocks otherwise. |
 
-These results come from jOtter's own detection in each terminal (kitty 0.49, Ghostty 1.3, foot 1.27, WezTerm 2026-03, Alacritty 0.17, tmux 3.6), with default settings. The docs' recording rig checks them again whenever it runs. Run jOtter with `--log` to see what it detects in yours: the log's `terminal:` line names the image protocol, the cell size and the keyboard protocol.
+These results come from jOtter's own detection in each terminal (kitty 0.49, Ghostty 1.3, foot 1.27, WezTerm 2026-03, Alacritty 0.17, Konsole 26.08, GNOME Terminal 3.60 on VTE 0.84, xterm 411, tmux 3.6), with default settings. The docs' recording rig checks them again whenever it runs. Run jOtter with `--log` to see what it detects in yours: the log's `terminal:` line names the image protocol, the cell size and the keyboard protocol.
 
 **Half-blocks** means images are drawn with Unicode characters at two pixels per cell. Plots stay readable, but fine detail and small text are lost.
 
@@ -33,6 +35,9 @@ The same notebook in each terminal:
   <Still name="term-foot" alt="jOtter in foot: a sharp plot (sixel) and rendered math" caption="foot" />
   <Still name="term-wezterm" alt="jOtter in WezTerm: a sharp plot (iTerm2 protocol) and rendered math" caption="WezTerm" />
   <Still name="term-alacritty" alt="jOtter in Alacritty: the plot and math drawn with half-block characters" caption="Alacritty (half-blocks)" />
+  <Still name="term-konsole" alt="jOtter in Konsole" caption="Konsole" />
+  <Still name="term-gnome-terminal" alt="jOtter in GNOME Terminal" caption="GNOME Terminal" />
+  <Still name="term-xterm" alt="jOtter in xterm started as a VT340" caption="xterm (-ti vt340)" />
 </div>
 
 ## Known quirks

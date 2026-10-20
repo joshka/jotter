@@ -24,17 +24,31 @@ let terminals = [
     [alacritty, "alacritty -o 'font.normal.family=\"JetBrains Mono\"' -o font.size=11.5 -e"]
     [wezterm, "wezterm --config 'font=wezterm.font(\"JetBrains Mono\")' --config font_size=11.5 --config enable_tab_bar=false --config 'window_close_confirmation=\"NeverPrompt\"' --config enable_wayland=true start --always-new-process --cwd . --"]
     [ghostty, "ghostty --font-family='JetBrains Mono' --font-size=11.5 --confirm-close-surface=false -e"]
+    [konsole, "konsole --nofork -p 'Font=JetBrains Mono,11.5' -e"]
+    # its own session bus; no gvfs or portal daemons, whose FUSE mounts would
+    # outlive the scene
+    [gnome-terminal, "env GIO_USE_VFS=local GTK_USE_PORTAL=0 dbus-run-session -- gnome-terminal --wait --"]
+    # sixel only as a VT340 (-ti vt340 or decTerminalID: vt340); off by default
+    [xterm, "xterm -fa 'JetBrains Mono' -fs 11.5 -ti vt340 -e"]
 ]
 for t in $terminals {
     let log = $env.JREC_RUN | path join $"($t.slug).log"
     let jlog = $env.JREC_RUN | path join $"($t.slug).jotter.log"
-    # the redirect covers the whole subshell, so nothing keeps our pipe open
-    let pid = ^bash -c $"\(cd '($env.JREC_WORK)' && exec ($t.command) jotter --log '($jlog)' gallery.ipynb\) > '($log)' 2>&1 & echo $!" | str trim
+    let launch = $"cd '($env.JREC_WORK)' && exec ($t.command) jotter --log '($jlog)' gallery.ipynb"
+    # the redirect covers the whole subshell, so nothing keeps our pipe open;
+    # xterm starts through sway, which knows its Xwayland DISPLAY
+    let pid = if $t.slug == "xterm" {
+        sway exec $"bash -c \"($launch) > '($log)' 2>&1\""
+        null
+    } else {
+        ^bash -c $"\(($launch)\) > '($log)' 2>&1 & echo $!" | str trim
+    }
     pause 5sec # start, query the terminal, draw
     sway fullscreen enable
     pause 1500ms
     still $"term-($t.slug)"
-    ^kill $pid | complete | ignore # it may have exited already
+    if $pid == null { ^pkill -x xterm | complete | ignore } else { ^kill $pid | complete | ignore } # it may have exited already
+    ^pkill -f gnome-terminal-server | complete | ignore # outlives its client, window and all
     pause 1sec
     let got = try { detected $jlog } catch { $"no jotter log; terminal said:\n(open --raw $log | lines | last 6 | str join "\n")" }
     print $"   ($t.slug): ($got)"
