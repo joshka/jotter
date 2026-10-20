@@ -11,8 +11,10 @@ jobs:
     strategy:
       matrix:
         include:
-          - { arch: x86_64, runner: ubuntu-latest }
-          - { arch: aarch64, runner: ubuntu-24.04-arm }
+          # static musl binaries run on every Linux distro regardless of glibc
+          - { arch: x86_64, os: linux, runner: ubuntu-latest, target: x86_64-unknown-linux-musl }
+          - { arch: aarch64, os: linux, runner: ubuntu-24.04-arm, target: aarch64-unknown-linux-musl }
+          - { arch: aarch64, os: macos, runner: macos-latest, target: aarch64-apple-darwin }
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
@@ -20,21 +22,21 @@ jobs:
         run: test "${GITHUB_REF_NAME#v}" = "$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')"
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.arch }}-unknown-linux-musl
+          targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
-      # static musl binary: runs on every distro regardless of glibc
-      - run: sudo apt-get update && sudo apt-get install -y musl-tools
-      - run: cargo build --release --locked --target ${{ matrix.arch }}-unknown-linux-musl
+      - if: matrix.os == 'linux'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - run: cargo build --release --locked --target ${{ matrix.target }}
       - run: |
-          cp target/${{ matrix.arch }}-unknown-linux-musl/release/jotter .
+          cp target/${{ matrix.target }}/release/jotter .
           strip jotter
           ./jotter --generate gen # man page + shell completions
           mv gen/man gen/completions .
-          tar czf jotter-${{ matrix.arch }}-linux.tar.gz jotter man completions README.md LICENSE-MIT LICENSE-APACHE
+          tar czf jotter-${{ matrix.arch }}-${{ matrix.os }}.tar.gz jotter man completions README.md LICENSE-MIT LICENSE-APACHE
       - uses: actions/upload-artifact@v4
         with:
-          name: jotter-${{ matrix.arch }}
-          path: jotter-${{ matrix.arch }}-linux.tar.gz
+          name: jotter-${{ matrix.target }}
+          path: jotter-${{ matrix.arch }}-${{ matrix.os }}.tar.gz
 
   release:
     needs: build

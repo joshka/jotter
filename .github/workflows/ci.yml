@@ -16,3 +16,23 @@ jobs:
       - run: cargo fmt --check
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test
+      # the kernel and nvim layers are only exercised against the real
+      # programs: their tests are #[ignore]d and need ipykernel and nvim
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install ipykernel
+      - uses: rhysd/action-setup-vim@v1
+        with:
+          neovim: true
+      - run: echo "JUPYTER_PATH=$(python -c 'import sys; print(sys.prefix)')/share/jupyter" >> "$GITHUB_ENV"
+      - run: cargo test -- --ignored
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test
+      - run: cargo build --release --locked
