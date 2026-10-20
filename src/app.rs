@@ -1002,6 +1002,9 @@ impl App {
                 self.marks.clear();
                 self.message = Some("all marks deleted".into());
             }
+            // a deliberate crash, to check that the terminal comes back and
+            // the autosave is offered at the next open (tests/crash.rs)
+            ("panic", "") => panic!(":panic"),
             ("delm" | "delmarks", letters) if !letters.is_empty() => {
                 self.marks.retain(|c, _| !letters.contains(*c));
             }

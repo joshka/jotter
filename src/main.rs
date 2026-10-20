@@ -19,7 +19,7 @@ use crossterm::event::{
     EnableFocusChange, EnableMouseCapture, Event, EventStream, KeyEventKind,
     KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
 };
-use futures::StreamExt;
+use futures::{FutureExt, StreamExt};
 use std::path::PathBuf;
 use tokio::sync::mpsc;
 use ui::Rendered;
@@ -139,13 +139,18 @@ async fn main() -> Result<()> {
         if enhanced { "kitty" } else { "legacy" }
     );
     enter_extras(enhanced);
-    let result = run(
+    // A panic unwinds through here: ratatui's hook has already left the
+    // alternate screen and printed the message, and this path switches off
+    // the modes it doesn't know about (mouse, paste, keyboard protocol) and
+    // keeps the unsaved work as the recovery copy.
+    let result = std::panic::AssertUnwindSafe(run(
         &mut terminal,
         &mut app,
         &mut rendered,
         &mut events_rx,
         enhanced,
-    )
+    ))
+    .catch_unwind()
     .await;
     leave_extras(enhanced);
     let _ = crossterm::execute!(std::io::stdout(), SetCursorStyle::DefaultUserShape);
@@ -155,7 +160,13 @@ async fn main() -> Result<()> {
     let _ = ratatui::try_restore();
     let _ = terminal.show_cursor();
     std::mem::forget(terminal);
-    result
+    match result {
+        Ok(result) => result,
+        Err(payload) => {
+            app.maybe_autosave();
+            std::panic::resume_unwind(payload)
+        }
+    }
 }
 
 async fn run(
