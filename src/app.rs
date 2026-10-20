@@ -757,7 +757,7 @@ impl App {
 
     /// Bracketed paste, whole: a key per character would run each one as a
     /// command outside the editor, and cost an nvim round trip each inside.
-    pub fn on_paste(&mut self, text: String) {
+    pub fn on_paste(&mut self, text: String, rendered: &mut Rendered) {
         let text = text.replace("\r\n", "\n").replace('\r', "\n");
         self.message = None;
         if let Some(req) = &mut self.stdin_req {
@@ -767,10 +767,7 @@ impl App {
         } else if let Some(editor) = &mut self.editor {
             self.completion = None;
             if let Err(e) = editor.paste(&text) {
-                // nvim died: salvage the text into the builtin editor
-                let source = editor.source();
-                self.editor = Some(Backend::Builtin(Editor::new(&source)));
-                self.message = Some(format!("nvim backend lost ({e:#}) — builtin editor"));
+                self.nvim_failed(e, rendered);
             }
         } else {
             self.message = Some("paste ignored outside a cell (i or A edits it)".into());
@@ -1229,13 +1226,7 @@ impl App {
         let outcome = match editor.input(key) {
             Ok(outcome) => outcome,
             Err(e) => {
-                // nvim died mid-edit: salvage the text into the builtin editor
-                let source = editor.source();
-                if let Some(force) = editor.take_write_request() {
-                    self.write_from_editor(source.clone(), force, rendered); // honor a final :wq
-                }
-                self.editor = Some(Backend::Builtin(Editor::new(&source)));
-                self.message = Some(format!("nvim backend lost ({e:#}) — builtin editor"));
+                self.nvim_failed(e, rendered);
                 return;
             }
         };
@@ -1269,6 +1260,26 @@ impl App {
                 }
             }
         }
+    }
+
+    /// An nvim request failed. A late reply keeps the session: the key is
+    /// queued in nvim and the next key reads the state back. Anything else
+    /// means the child is gone: salvage the text into the builtin editor.
+    fn nvim_failed(&mut self, e: anyhow::Error, rendered: &mut Rendered) {
+        if crate::nvim::is_busy(&e) {
+            self.message =
+                Some("nvim is busy — keys are queued, the cell refreshes with the next one".into());
+            return;
+        }
+        let Some(editor) = &mut self.editor else {
+            return;
+        };
+        let source = editor.source();
+        if let Some(force) = editor.take_write_request() {
+            self.write_from_editor(source.clone(), force, rendered); // honor a final :wq
+        }
+        self.editor = Some(Backend::Builtin(Editor::new(&source)));
+        self.message = Some(format!("nvim backend lost ({e:#}) — builtin editor"));
     }
 
     fn commit_editor(&mut self, rendered: &mut Rendered) {
@@ -2458,7 +2469,7 @@ pub(super) mod tests {
         let mut app = App::open(PathBuf::new(), None, tx).unwrap();
         let mut r = Rendered::build(&app.notebook, None, Default::default());
         let before = app.notebook.cells.len();
-        app.on_paste("arst\n".into()); // would insert and retype cells as keys
+        app.on_paste("arst\n".into(), &mut r); // would insert and retype cells as keys
         assert_eq!(app.notebook.cells.len(), before);
         assert!(
             app.message
@@ -2471,7 +2482,7 @@ pub(super) mod tests {
             KeyEvent::new(KeyCode::Char('A'), KeyModifiers::NONE),
             &mut r,
         );
-        app.on_paste("x = 1\r\ny = 2".into());
+        app.on_paste("x = 1\r\ny = 2".into(), &mut r);
         let esc = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
         app.on_key(esc, &mut r);
         app.on_key(esc, &mut r);

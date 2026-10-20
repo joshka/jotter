@@ -246,7 +246,7 @@ async fn run(
 fn on_term_event(app: &mut App, rendered: &mut Rendered, event: Event) -> Action {
     match event {
         Event::Key(key) if key.kind == KeyEventKind::Press => return app.on_key(key, rendered),
-        Event::Paste(text) => app.on_paste(text),
+        Event::Paste(text) => app.on_paste(text, rendered),
         Event::Mouse(mouse) => app.on_mouse(mouse, rendered),
         // reflow happens on redraw; images need a rebuild if the font changed
         Event::Resize(..) => rendered.on_resize(&app.notebook),

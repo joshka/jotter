@@ -392,11 +392,31 @@ impl Rpc {
                     return payload.map_err(|e| anyhow!("nvim: {e}"));
                 }
                 Ok(_) => {} // stale response of a timed-out request: drop
-                Err(mpsc::RecvTimeoutError::Timeout) => bail!("nvim rpc timeout ({method})"),
+                Err(mpsc::RecvTimeoutError::Timeout) => return Err(Busy(method.into()).into()),
                 Err(mpsc::RecvTimeoutError::Disconnected) => bail!("nvim exited"),
             }
         }
     }
+}
+
+/// A reply didn't come within the budget: nvim is alive but blocked (a
+/// plugin in a synchronous call, `:!cmd`, a cold machine). The request is
+/// still queued in nvim, so the caller keeps the session and reads the
+/// state back with the next key instead of giving up on the backend.
+#[derive(Debug)]
+pub struct Busy(pub String);
+
+impl std::fmt::Display for Busy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "nvim rpc timeout ({})", self.0)
+    }
+}
+
+impl std::error::Error for Busy {}
+
+/// Was this error a late reply rather than a dead child?
+pub fn is_busy(e: &anyhow::Error) -> bool {
+    e.downcast_ref::<Busy>().is_some()
 }
 
 impl Drop for Rpc {
@@ -842,6 +862,26 @@ mod tests {
         assert_eq!(k(F(5), M::NONE), "<F5>");
         assert_eq!(k(Left, M::CONTROL | M::SHIFT), "<C-S-Left>");
         assert_eq!(key_to_nvim(key(CapsLock, M::NONE)), None);
+    }
+
+    /// A blocked nvim (a synchronous shell call here, a plugin in real life)
+    /// reports busy instead of losing the session; the state comes back
+    /// once it answers again. `cargo test -- --ignored busy_nvim`.
+    #[test]
+    #[ignore = "spawns a real nvim"]
+    fn busy_nvim_keeps_the_session() {
+        let session = NvimSession::spawn(false).expect("spawn nvim");
+        let mut c = NvimCell::open(session, "busy", "keep me", "").expect("open");
+        let t0 = Instant::now();
+        let err = c.feed(":call system('sleep 0.7')<CR>").unwrap_err();
+        assert!(is_busy(&err), "not reported as busy: {err:#}");
+        assert!(
+            t0.elapsed() < Duration::from_secs(2),
+            "gave up within the budgets"
+        );
+        std::thread::sleep(Duration::from_millis(800));
+        c.feed("").expect("the session survived");
+        assert_eq!((c.lines[0].as_str(), c.mode.as_str()), ("keep me", "n"));
     }
 
     /// M0 spike + M1/M2 exit criteria against a real nvim:
