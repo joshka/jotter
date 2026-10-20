@@ -132,6 +132,7 @@ pub enum Action {
 
 pub struct App {
     pub notebook: Notebook,
+    /// Empty for a scratchpad (`jotter` without a file); `:w name` names it.
     pub path: PathBuf,
     pub selected: usize,
     /// First visible rendered line; adjusted in ui::draw to keep selection visible.
@@ -397,7 +398,7 @@ impl App {
             wheel_latch: None,
         };
         app.disk_mtime = mtime(&app.path);
-        if is_new {
+        if is_new && !app.is_scratch() {
             app.message = Some(format!("new notebook — w creates {}", app.path.display()));
         }
         app.check_autosave();
@@ -425,7 +426,17 @@ impl App {
 
     /// Where the autosave timer writes this notebook's recovery copy.
     pub fn autosave_path(&self) -> PathBuf {
-        autosave_path_for(&self.path)
+        // ponytail: one scratchpad sidecar per working directory, so two
+        // scratchpads open in the same directory share (and clobber) it
+        if self.is_scratch() {
+            autosave_path_for(std::path::Path::new("[scratch]"))
+        } else {
+            autosave_path_for(&self.path)
+        }
+    }
+
+    pub fn is_scratch(&self) -> bool {
+        self.path.as_os_str().is_empty()
     }
 
     /// SIGTERM/SIGHUP/SIGINT: flush unsaved work to the autosave so the
@@ -517,6 +528,10 @@ impl App {
     /// Save to `path`; `force` skips the external-modification check.
     /// Returns true on success.
     fn save_notebook(&mut self, force: bool, rendered: &mut Rendered) -> bool {
+        if self.is_scratch() {
+            self.message = Some("scratchpad has no file — :w name.ipynb".into());
+            return false;
+        }
         if !force && self.changed_on_disk() {
             self.message = Some("file changed on disk since open/save — W to overwrite".into());
             return false;
@@ -847,8 +862,7 @@ impl App {
         let k = key.code;
         match confirm {
             Confirm::Quit => match k {
-                // discard; the autosave stays behind as a safety net
-                KeyCode::Char('q') => self.should_quit = true,
+                KeyCode::Char('q') => self.discard_quit(),
                 KeyCode::Char('s') | KeyCode::Char('w') => {
                     if self.save_notebook(false, rendered) {
                         self.should_quit = true;
@@ -971,7 +985,7 @@ impl App {
             }
             ("q" | "q!", "") if editing => self.leave_editor(force, rendered),
             ("q", "") => self.quit(),
-            ("q!" | "qa!", "") => self.should_quit = true,
+            ("q!" | "qa!", "") => self.discard_quit(),
             ("qa", "") => {
                 self.leave_editor(false, rendered);
                 self.quit();
@@ -1022,6 +1036,16 @@ impl App {
         } else {
             self.should_quit = true;
         }
+    }
+
+    /// Quit without saving. The autosave stays behind as a safety net, but
+    /// a scratchpad's goes, like vim's `:q!` dropping a no-name swap file
+    /// (else every later `jotter` would offer to restore the throwaway).
+    fn discard_quit(&mut self) {
+        if self.is_scratch() {
+            let _ = std::fs::remove_file(self.autosave_path());
+        }
+        self.should_quit = true;
     }
 
     /// Save under a new path and continue editing that file. Returns false
@@ -2399,6 +2423,22 @@ pub(super) mod tests {
             app.save_notebook(false, &mut rendered),
             "plain w overwrites after keep-mine"
         );
+        std::fs::remove_file(&path).ok();
+    }
+
+    /// `jotter` without a file: w has nowhere to write, `:w name` names it.
+    #[test]
+    fn scratchpad_saves_only_under_a_name() {
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let mut app = App::open(PathBuf::new(), None, tx).unwrap();
+        let mut r = Rendered::build(&app.notebook, None, Default::default());
+        assert!(app.is_scratch());
+        assert!(!app.save_notebook(false, &mut r));
+        let path =
+            std::env::temp_dir().join(format!("jotter-scratch-{}.ipynb", std::process::id()));
+        app.ex_command(&format!("w {}", path.display()), &mut r);
+        assert_eq!(app.path, path, "{:?}", app.message);
+        assert!(!app.dirty && path.exists());
         std::fs::remove_file(&path).ok();
     }
 

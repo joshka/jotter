@@ -33,8 +33,7 @@ use ui::Rendered;
 #[derive(Parser)]
 #[command(name = "jotter", version)]
 struct Args {
-    /// Path to the .ipynb file to open
-    #[arg(required_unless_present = "generate")]
+    /// Path to the .ipynb file to open (none: a scratchpad; `:w name.ipynb` saves it)
     notebook: Option<PathBuf>,
     /// Kernelspec name (default: the notebook's kernelspec, then python3)
     #[arg(long)]
@@ -77,10 +76,10 @@ fn leave_extras(enhanced: bool) {
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
-    let Some(notebook) = args.notebook else {
-        let dir = args.generate.expect("clap requires notebook or --generate");
+    if let Some(dir) = args.generate {
         return gendocs::generate(Args::command(), &dir);
-    };
+    }
+    let notebook = args.notebook.unwrap_or_default(); // empty: scratchpad
     let config_warning = config::init();
     log::init(args.log.as_deref())?; // bad log path: fail loudly before the alt screen
     let (events_tx, mut events_rx) = mpsc::unbounded_channel();

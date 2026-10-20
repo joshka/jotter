@@ -2053,7 +2053,11 @@ pub fn draw(frame: &mut Frame, app: &mut App, rendered: &mut Rendered) {
             ),
             Span::raw(format!(
                 " {}{}  cell {}/{}  ",
-                app.path.display(),
+                if app.is_scratch() {
+                    "[scratch]".into()
+                } else {
+                    app.path.display().to_string()
+                },
                 if app.dirty { " [+]" } else { "" },
                 app.selected + 1,
                 app.notebook.cells.len()
@@ -2957,7 +2961,10 @@ mod tests {
         let line = &output_lines(&out)[0];
         let hl: Vec<_> = line.spans.iter().filter(|s| s.style.bg.is_some()).collect();
         assert!(!hl.is_empty());
-        assert!(hl.iter().all(|s| s.style.fg == Some(Color::Black)), "{line:?}");
+        assert!(
+            hl.iter().all(|s| s.style.fg == Some(Color::Black)),
+            "{line:?}"
+        );
     }
 
     /// Invalid code (`f"{}"`, `np.(`) gets the theme's `invalid` style: text in
