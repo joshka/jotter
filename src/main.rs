@@ -104,20 +104,25 @@ async fn main() -> Result<()> {
     // can't restore the terminal): ratatui's first frame only writes cells
     // that differ from a *blank* screen, so blank it for real first.
     clear_screen();
-    // Query graphics protocol + font size (before EventStream claims stdin).
-    // Falls back to unicode halfblocks; timeout-guarded for dumb terminals.
+    // Two round trips before EventStream claims stdin, each ending at a
+    // reply every terminal sends (DSR, DA1) so the timeouts only matter for
+    // a terminal that answers nothing: the graphics protocol and cell size
+    // (falls back to unicode halfblocks), then the colours for recolouring
+    // plots together with the keyboard protocol (Shift+Enter, Ctrl+Enter as
+    // distinct keys).
     let picker = if args.no_images {
         None
     } else {
-        ratatui_image::picker::Picker::from_query_stdio().ok()
+        ratatui_image::picker::Picker::from_query_stdio_with_options(
+            ratatui_image::picker::cap_parser::QueryStdioOptions {
+                timeout: std::time::Duration::from_secs(1),
+                ..Default::default()
+            },
+        )
+        .ok()
     };
-    // the terminal's colours, for recolouring plots (answers are read from
-    // stdin, so this too must come before EventStream)
-    recolor::init(
-        (picker.is_some() && config::get().recolor_plots)
-            .then(recolor::query)
-            .flatten(),
-    );
+    let (palette, enhanced) = recolor::query();
+    recolor::init(palette.filter(|_| picker.is_some() && config::get().recolor_plots));
     // kitty keeps images across a crashed session: drop them all
     if picker
         .as_ref()
@@ -130,8 +135,6 @@ async fn main() -> Result<()> {
     let dir = app.path.parent().map(PathBuf::from).unwrap_or_default();
     let mut rendered = Rendered::build(&app.notebook, picker, dir);
 
-    // kitty keyboard protocol: makes Shift+Enter / Ctrl+Enter distinct keys
-    let enhanced = crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false);
     app.keyboard_protocol = enhanced;
     ::log::info!(
         "terminal: graphics {}, keyboard protocol {}",

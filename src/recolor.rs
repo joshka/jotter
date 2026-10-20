@@ -28,17 +28,23 @@ fn palette() -> Option<Palette> {
     PALETTE.get().copied().flatten()
 }
 
-/// Ask the terminal for its colours: OSC 10 (fg) and 11 (bg), then DA1 as a
-/// sentinel, since every terminal answers DA1, so we stop waiting as soon as
-/// it arrives instead of running into the timeout. Needs raw mode, and must
-/// run before anything else reads stdin.
-pub fn query() -> Option<Palette> {
+/// Ask the terminal for its colours, OSC 10 (fg) and 11 (bg), and whether
+/// it speaks the kitty keyboard protocol (`CSI ? u`), then DA1 as a
+/// sentinel: every terminal answers DA1, so we stop waiting as soon as it
+/// arrives instead of running into the timeout. One round trip for both,
+/// which is why the keyboard question rides along here. Needs raw mode,
+/// and must run before anything else reads stdin.
+pub fn query() -> (Option<Palette>, bool) {
     use std::io::Write;
     let mut out = std::io::stdout();
-    out.write_all(b"\x1b]10;?\x1b\\\x1b]11;?\x1b\\\x1b[c")
-        .ok()?;
-    out.flush().ok()?;
-    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(300);
+    if out
+        .write_all(b"\x1b]10;?\x1b\\\x1b]11;?\x1b\\\x1b[?u\x1b[c")
+        .and_then(|()| out.flush())
+        .is_err()
+    {
+        return (None, false);
+    }
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
     let mut buf = Vec::new();
     while !has_da1(&buf) {
         let left = deadline.saturating_duration_since(std::time::Instant::now());
@@ -61,7 +67,15 @@ pub fn query() -> Option<Palette> {
         }
         buf.extend_from_slice(&chunk[..n as usize]);
     }
-    parse_reply(&buf)
+    (parse_reply(&buf), has_keyboard_flags(&buf))
+}
+
+/// Keyboard protocol reply: `ESC [ ? <flags> u` (DA1 is `ESC [ ? … c`).
+fn has_keyboard_flags(buf: &[u8]) -> bool {
+    (0..buf.len()).any(|i| {
+        buf[i..].starts_with(b"\x1b[?")
+            && buf[i + 3..].iter().find(|b| !b.is_ascii_digit()) == Some(&b'u')
+    })
 }
 
 /// DA1 reply: `ESC [ ? … c`.
@@ -137,6 +151,21 @@ fn recolor(mut img: RgbaImage, p: Palette) -> RgbaImage {
         }
     }
     img
+}
+
+#[cfg(test)]
+mod keyboard_tests {
+    use super::has_keyboard_flags;
+
+    #[test]
+    fn keyboard_flags_reply_is_told_from_da1() {
+        assert!(has_keyboard_flags(b"\x1b[?0u\x1b[?62;22c"));
+        assert!(has_keyboard_flags(
+            b"\x1b]11;rgb:2b/30/3b\x07\x1b[?1u\x1b[?62c"
+        ));
+        assert!(!has_keyboard_flags(b"\x1b[?62;22c"));
+        assert!(!has_keyboard_flags(b"\x1b[?62;4c\x1b[0n"));
+    }
 }
 
 #[cfg(test)]
