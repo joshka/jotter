@@ -1441,6 +1441,10 @@ impl App {
                 KeyCode::Char('k') | KeyCode::Up => {
                     self.selected = self.selected.saturating_sub(step)
                 }
+                // the cell in $EDITOR (Ctrl+g, as in Claude Code and Codex)
+                KeyCode::Char('g') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    return Action::ExternalEdit;
+                }
                 KeyCode::Char('g') => {
                     self.pending = Some('g');
                     self.count = count; // keep it for 5gg
@@ -1509,7 +1513,6 @@ impl App {
                         editor.append_end();
                     }
                 }
-                KeyCode::Char('E') => return Action::ExternalEdit,
                 // run (Shift+Enter / Ctrl+Enter need the kitty keyboard protocol)
                 KeyCode::Enter | KeyCode::Char('r') => {
                     self.run_cell(self.selected, rendered);

@@ -12,7 +12,7 @@ jOtter follows the [XDG base directory](https://specifications.freedesktop.org/b
 | Configuration | `$XDG_CONFIG_HOME/jotter/config.toml`, default `~/.config/jotter/config.toml` | Optional. See [Configuration](/jotter/reference/configuration/). |
 | Autosaves | `$XDG_STATE_HOME/jotter/autosave/`, default `~/.local/state/jotter/autosave/` | One file per notebook, named after its absolute path with `/` replaced by `%`. Removed when you save. |
 | Debug log | wherever `--log` points | Only written with `--log`; appended to, never truncated. |
-| External-editor file | `$TMPDIR/jotter-cell-<pid>.<ext>`, default `/tmp` | Exists only while <kbd>E</kbd> is open. |
+| External-editor file | `$TMPDIR/jotter-cell-<pid>.<ext>`, default `/tmp` | Exists only while <kbd>Ctrl</kbd>+<kbd>g</kbd> is open. |
 
 The kernel's own files, such as its connection file, are handled by the Jupyter libraries in their usual runtime directory.
 
@@ -25,6 +25,6 @@ jOtter looks for kernelspecs in the active environment, a `.venv` or `venv` next
 | Variable | Effect |
 | --- | --- |
 | `XDG_CONFIG_HOME`, `XDG_STATE_HOME` | Move the config and state directories. |
-| `VISUAL`, `EDITOR` | The editor for <kbd>E</kbd>, in that order; `vi` if neither is set. |
+| `VISUAL`, `EDITOR` | The editor for <kbd>Ctrl</kbd>+<kbd>g</kbd>, in that order; `vi` if neither is set. |
 | `VIRTUAL_ENV`, `CONDA_PREFIX` | An activated environment whose kernel is preferred. |
 | `JUPYTER_PATH` | Extra directories to search for kernelspecs. |

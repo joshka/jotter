@@ -2780,7 +2780,7 @@ pub const HELP: &[(&str, &[(&str, &str)])] = &[
             ("Enter", "edit cell"),
             ("i A", "edit in insert mode / at the end"),
             ("Esc", "leave the editor (normal mode)"),
-            ("E", "edit cell in $EDITOR"),
+            ("Ctrl+g", "edit cell in $EDITOR"),
             ("t", "cycle code → markdown → latex"),
             ("f F", "format cell / all code cells"),
         ],

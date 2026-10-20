@@ -1,4 +1,4 @@
-# External editor: E opens the cell in $EDITOR (here nvim); the edit comes back.
+# External editor: Ctrl+g opens the cell in $EDITOR (here nvim); the edit comes back.
 send "jotter cells.ipynb"
 key enter
 wait-for "○ idle"
@@ -6,7 +6,7 @@ rec start
 pause 1sec
 key j j --gap 400ms
 pause 600ms
-key E
+key ctrl+g
 wait-for "clean(data)"
 pause 1200ms
 key A
