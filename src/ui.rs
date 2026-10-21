@@ -3496,8 +3496,10 @@ mod tests {
         let mut app = crate::app::App::open(path.clone(), None, tx).unwrap();
         std::fs::remove_file(&path).ok();
         let mut rendered = Rendered::build(&app.notebook, None, Default::default());
+        // wide enough for the status line to show the whole temp path (macOS
+        // puts it under /var/folders/<random>/T) and still the cell counter
         let mut terminal =
-            ratatui::Terminal::new(ratatui::backend::TestBackend::new(60, 30)).unwrap();
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(160, 30)).unwrap();
         terminal.draw(|f| draw(f, &mut app, &mut rendered)).unwrap();
         let rows = buffer_rows(&terminal);
         let all = rows.join("\n");
