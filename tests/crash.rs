@@ -55,17 +55,21 @@ fn a_panic_restores_the_terminal_and_autosaves() {
         ws_xpixel: 0,
         ws_ypixel: 0,
     };
-    // SAFETY: openpty fills two fds from a valid winsize; nothing else is shared
+    // SAFETY: openpty fills two fds; the size goes in by ioctl afterwards
+    // (openpty's pointer parameters differ in mutability between Linux and
+    // macOS; `as _` on the ioctl requests covers their differing int types)
     let rc = unsafe {
         libc::openpty(
             &mut master,
             &mut slave,
             std::ptr::null_mut(),
-            std::ptr::null(),
-            &ws,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
         )
     };
     assert_eq!(rc, 0, "openpty");
+    // SAFETY: a valid fd and a valid winsize
+    unsafe { libc::ioctl(master, libc::TIOCSWINSZ as _, &ws) };
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_jotter"));
     cmd.arg(&nb)
         .arg("--no-images")
@@ -79,7 +83,7 @@ fn a_panic_restores_the_terminal_and_autosaves() {
             .stderr(Stdio::from_raw_fd(libc::dup(slave)));
         cmd.pre_exec(move || {
             libc::setsid();
-            libc::ioctl(slave, libc::TIOCSCTTY, 0);
+            libc::ioctl(slave, libc::TIOCSCTTY as _, 0);
             Ok(())
         });
     }
