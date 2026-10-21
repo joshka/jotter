@@ -2,6 +2,28 @@
 
 Every release of jOtter. The same notes are on each [GitHub release](https://github.com/samox73/jotter/releases).
 
+## 0.5.0 (2026-10-21)
+
+### Features
+
+- Jotter without a file opens a scratchpad; :w name.ipynb saves it ([3925161](https://github.com/samox73/jotter/commit/3925161d0ceb5cdb781c8483e2760406aa29ec0e))
+- Ctrl+g opens the cell in $EDITOR, as in Claude Code and Codex (was E) ([7d5d6f8](https://github.com/samox73/jotter/commit/7d5d6f81534141bc6242340d72f15a308880315f))
+
+### Bug fixes
+
+- Black text on IPython's yellow traceback highlight ([510abd0](https://github.com/samox73/jotter/commit/510abd0ae4dbaefb5e8efc2704f04f0376b1a418))
+- A crash hands the terminal back and keeps the unsaved work ([75202cf](https://github.com/samox73/jotter/commit/75202cf2b93ac6b7e587906008b7725f19c0285f))
+- A slow nvim reply no longer loses the nvim backend ([1531e2e](https://github.com/samox73/jotter/commit/1531e2e3bbd82c77e64e0d55ae5b4bb211ab6961))
+
+### Performance
+
+- One redraw per burst of keys, and bracketed paste in one step ([887b32d](https://github.com/samox73/jotter/commit/887b32d4c8f2688e0be51f821b58056a1316def0))
+- One terminal round trip less at startup, and a 2 s cap for silent terminals ([d20beda](https://github.com/samox73/jotter/commit/d20beda9aaa860ee12070a00e44905d0811b2c73))
+
+### Documentation
+
+- Konsole, GNOME Terminal and xterm in the terminal gallery, measured ([1624eba](https://github.com/samox73/jotter/commit/1624eba8209f2af57001c5b68df481a028013966))
+
 ## 0.4.0 (2026-10-12)
 
 ### Features
