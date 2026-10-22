@@ -44,6 +44,10 @@ Press `?` inside for the keys. [Your first notebook](https://samox73.github.io/j
 
 Bug reports and pull requests are welcome; see [Contributing](https://samox73.github.io/jotter/project/contributing/).
 
+## AI use
+
+jOtter is built with [Claude Code](https://claude.com/claude-code). I direct the work and review the changes; the tests run on every change in CI.
+
 ## License
 
 Licensed under either of [Apache License 2.0](https://github.com/samox73/jotter/blob/main/LICENSE-APACHE) or [MIT](https://github.com/samox73/jotter/blob/main/LICENSE-MIT), at your option.
