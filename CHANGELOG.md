@@ -2,6 +2,12 @@
 
 Every release of jOtter. The same notes are on each [GitHub release](https://github.com/samox73/jotter/releases).
 
+## 0.5.2 (2026-10-22)
+
+### Bug fixes
+
+- Publish the PyPI wheels that v0.5.1 failed to build ([2a42155](https://github.com/samox73/jotter/commit/2a4215527656292adb7f37c7b86eb830ef68ad5e))
+
 ## 0.5.1 (2026-10-22)
 
 ### Features
