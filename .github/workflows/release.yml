@@ -82,3 +82,39 @@ jobs:
       - run: cargo publish --locked
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+  # PyPI wheels: the same binary, for `uv tool install jotter-tui`
+  wheels:
+    needs: build
+    strategy:
+      matrix:
+        include:
+          - { runner: ubuntu-latest, target: x86_64-unknown-linux-gnu }
+          - { runner: ubuntu-latest, target: aarch64-unknown-linux-gnu } # cross-compiled in maturin's manylinux cross image
+          - { runner: macos-latest, target: aarch64-apple-darwin }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          manylinux: auto # built in an old-glibc container, so the wheel runs on any current distro
+          args: --release --locked --strip --out dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel-${{ matrix.target }}
+          path: dist
+
+  pypi:
+    needs: wheels
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write # trusted publishing, no API token
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wheel-*
+          merge-multiple: true
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1

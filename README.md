@@ -4,16 +4,16 @@
 
 **A fast Jupyter notebook TUI. The Jupyter otter.**
 
-<img src="assets/banner.png" alt="jOtter mascot" width="400"/>
+<img src="https://raw.githubusercontent.com/samox73/jotter/main/assets/banner.png" alt="jOtter mascot" width="400"/>
 
-[Documentation](https://samox73.github.io/jotter/) · [Install](https://samox73.github.io/jotter/getting-started/installation/) · [Keybindings](https://samox73.github.io/jotter/reference/keybindings/) · [Changelog](CHANGELOG.md)
+[Documentation](https://samox73.github.io/jotter/) · [Install](https://samox73.github.io/jotter/getting-started/installation/) · [Keybindings](https://samox73.github.io/jotter/reference/keybindings/) · [Changelog](https://github.com/samox73/jotter/blob/main/CHANGELOG.md)
 
 </div>
 
 Open, edit and run real `.ipynb` notebooks in your terminal, with vim keys, inline plots and rendered LaTeX, and keystroke latency so low that holding a key is a non-event.
 
 <div align="center">
-<img src="docs/public/media/hero.gif" alt="jOtter opening a notebook and running it: a markdown cell with an equation, code cells with output, and an inline plot" width="720"/>
+<img src="https://raw.githubusercontent.com/samox73/jotter/main/docs/public/media/hero.gif" alt="jOtter opening a notebook and running it: a markdown cell with an equation, code cells with output, and an inline plot" width="720"/>
 </div>
 
 - **Your notebooks, untouched:** opens and saves `.ipynb` losslessly, byte for byte like Jupyter, so collaborators on JupyterLab never notice.
@@ -27,6 +27,7 @@ Open, edit and run real `.ipynb` notebooks in your terminal, with vim keys, inli
 ```sh
 cargo install jotter-tui --locked                 # crates.io (the binary is `jotter`)
 nix run github:samox73/jotter -- notebook.ipynb  # Nix
+uv tool install jotter-tui                        # PyPI
 ```
 
 Every [release](https://github.com/samox73/jotter/releases) has `.deb`, `.rpm` and `.apk` packages and a static binary for any Linux distribution; the [installation guide](https://samox73.github.io/jotter/getting-started/installation/) covers them all. To run code you need a Jupyter kernel, such as `pip install ipykernel` in your project's environment.
@@ -45,4 +46,4 @@ Bug reports and pull requests are welcome; see [Contributing](https://samox73.gi
 
 ## License
 
-Licensed under either of [Apache License 2.0](LICENSE-APACHE) or [MIT](LICENSE-MIT), at your option.
+Licensed under either of [Apache License 2.0](https://github.com/samox73/jotter/blob/main/LICENSE-APACHE) or [MIT](https://github.com/samox73/jotter/blob/main/LICENSE-MIT), at your option.

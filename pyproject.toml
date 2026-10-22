@@ -1,7 +1,8 @@
-[project]
-name = "jotter"
-version = "0.1.0"
-requires-python = ">=3.13"
-dependencies = [
-    "tqdm>=4.70.1",
-]
+# PyPI wheels (`uv tool install jotter-tui`): the jotter binary and nothing else.
+# Name, version, description and links come from Cargo.toml.
+[build-system]
+requires = ["maturin>=1.9,<2"]
+build-backend = "maturin"
+
+[tool.maturin]
+bindings = "bin"

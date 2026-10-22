@@ -1,11 +1,11 @@
 ---
 title: "Installation"
-description: "Install jOtter from a distribution package, Nix, Cargo, a static binary, or from source."
+description: "Install jOtter from a distribution package, Nix, Cargo, PyPI, a static binary, or from source."
 ---
 
 import { Tabs, TabItem, Aside, Steps } from '@astrojs/starlight/components';
 
-jOtter is a single binary for Linux (x86_64 and aarch64). Every [release](https://github.com/samox73/jotter/releases) ships distribution packages and a static binary that runs on any distribution. macOS builds from source; Windows is not supported.
+jOtter is a single binary for Linux (x86_64 and aarch64) and Apple Silicon Macs. Every [release](https://github.com/samox73/jotter/releases) ships distribution packages and a static binary that runs on any distribution. Windows is not supported.
 
 To run code you also need a Jupyter kernel, usually Python's `ipykernel`. See [Kernels](/jotter/getting-started/kernels/).
 
@@ -64,6 +64,20 @@ The crate is called `jotter-tui` on crates.io (the name `jotter` was taken); the
 cargo install jotter-tui --locked
 ```
 
+## PyPI
+
+The `jotter-tui` package on PyPI contains the same binary, for Linux (x86_64 and aarch64) and Apple Silicon Macs, and no Python code. jOtter finds your project's environment by itself, so install it as a tool rather than into that environment:
+
+```sh
+uv tool install jotter-tui     # or: pipx install jotter-tui
+```
+
+To try it without installing, name the command, since it isn't called `jotter-tui`:
+
+```sh
+uvx --from jotter-tui jotter notebook.ipynb
+```
+
 ## Static binary
 
 The release tarballs contain a statically linked binary, so they run on any Linux distribution regardless of its glibc version.
@@ -113,4 +127,4 @@ jotter --generate out/     # writes out/man/jotter.1 and out/completions/*
 
 ## Updating and uninstalling
 
-Install a newer package, tarball or `cargo install` over the old one. Uninstall with your package manager, `cargo uninstall jotter-tui`, or by deleting the binary. jOtter keeps its [configuration and autosaves](/jotter/reference/files/) under your XDG directories; delete `~/.config/jotter` and `~/.local/state/jotter` to remove them too.
+Install a newer package, tarball or `cargo install` over the old one, or run `uv tool upgrade jotter-tui`. Uninstall with your package manager, `cargo uninstall jotter-tui`, `uv tool uninstall jotter-tui`, or by deleting the binary. jOtter keeps its [configuration and autosaves](/jotter/reference/files/) under your XDG directories; delete `~/.config/jotter` and `~/.local/state/jotter` to remove them too.
