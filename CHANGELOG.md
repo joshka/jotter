@@ -2,6 +2,12 @@
 
 Every release of jOtter. The same notes are on each [GitHub release](https://github.com/samox73/jotter/releases).
 
+## 0.5.1 (2026-10-22)
+
+### Features
+
+- Install from PyPI with `uv tool install jotter-tui` ([ca26f49](https://github.com/samox73/jotter/commit/ca26f491a241d19a964ab1157bb8eb8519ffe47d))
+
 ## 0.5.0 (2026-10-21)
 
 ### Features
