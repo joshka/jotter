@@ -22,7 +22,7 @@ Download the file for your distribution and architecture from the [latest releas
   <TabItem label="Fedora / RHEL / openSUSE">
     ```sh
     sudo dnf install ./jotter-*.x86_64.rpm    # aarch64: jotter-*.aarch64.rpm
-    # openSUSE: sudo zypper install ./jotter-*.x86_64.rpm
+    # openSUSE (the package is unsigned): sudo zypper install --allow-unsigned-rpm ./jotter-*.x86_64.rpm
     ```
   </TabItem>
   <TabItem label="Alpine">
@@ -58,7 +58,7 @@ On NixOS or with home-manager, add the flake as an input and put its package in 
 
 ## Cargo
 
-The crate is called `jotter-tui` on crates.io (the name `jotter` was taken); the binary it installs is still `jotter`. Rust 1.85 or newer is required.
+The crate is called `jotter-tui` on crates.io (the name `jotter` was taken); the binary it installs is still `jotter`. Rust 1.90 or newer is required.
 
 ```sh
 cargo install jotter-tui --locked
@@ -101,7 +101,7 @@ sha256sum --check --ignore-missing SHA256SUMS
 
 <Steps>
 
-1. Install Rust 1.85 or newer ([rustup](https://rustup.rs)). jOtter needs no system libraries: its ZeroMQ stack is pure Rust.
+1. Install Rust 1.90 or newer ([rustup](https://rustup.rs)). jOtter needs no system libraries: its ZeroMQ stack is pure Rust.
 
 2. Build and install:
 
