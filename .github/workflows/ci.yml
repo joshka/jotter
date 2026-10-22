@@ -25,6 +25,10 @@ jobs:
       - uses: rhysd/action-setup-vim@v1
         with:
           neovim: true
+        env:
+          # /tmp is another filesystem on ubuntu-26.04 and the action's rename
+          # fails with EXDEV; drop once rhysd/action-setup-vim#80 is fixed
+          TMPDIR: ${{ runner.temp }}
       - run: echo "JUPYTER_PATH=$(python -c 'import sys; print(sys.prefix)')/share/jupyter" >> "$GITHUB_ENV"
       - run: cargo test -- --ignored
 
