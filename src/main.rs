@@ -19,6 +19,7 @@ use crossterm::event::{
     EnableFocusChange, EnableMouseCapture, Event, EventStream, KeyEventKind,
     KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
 };
+use crossterm::terminal::{BeginSynchronizedUpdate, EndSynchronizedUpdate};
 use futures::{FutureExt, StreamExt};
 use std::path::PathBuf;
 use tokio::sync::mpsc;
@@ -202,7 +203,11 @@ async fn run(
             let _ = crossterm::execute!(std::io::stdout(), style);
             cursor_mode = mode;
         }
+        // One synchronized update per frame (terminals without it ignore
+        // the mode), so the terminal never shows a half-drawn frame.
+        let _ = crossterm::execute!(std::io::stdout(), BeginSynchronizedUpdate);
         terminal.draw(|frame| ui::draw(frame, app, rendered))?;
+        let _ = crossterm::execute!(std::io::stdout(), EndSynchronizedUpdate);
         tokio::select! {
             maybe_event = term_events.next() => {
                 let Some(event) = maybe_event else { break };
