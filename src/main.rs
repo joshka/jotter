@@ -253,9 +253,17 @@ async fn run(
                 }
             },
             Some(event) = kernel_events.recv() => {
-                app.apply_kernel_event(event, rendered);
-                // drain whatever else queued up before redrawing once
+                // Drain whatever else queued up before redrawing once. The
+                // drain is cheap, so a kernel can't outrun it; applying is
+                // the work, and a display updated faster than its images
+                // decode (an inline animation) keeps only its latest update,
+                // so the screen shows the newest frame instead of freezing
+                // behind the backlog.
+                let mut queued = vec![event];
                 while let Ok(event) = kernel_events.try_recv() {
+                    queue_kernel_event(&mut queued, event);
+                }
+                for event in queued {
                     app.apply_kernel_event(event, rendered);
                 }
             }
@@ -272,6 +280,17 @@ async fn run(
         }
     }
     Ok(())
+}
+
+/// Add `event` to the batch, dropping earlier updates of the same display:
+/// each replaces the whole output, so only the last one matters.
+fn queue_kernel_event(queued: &mut Vec<kernel::Event>, event: kernel::Event) {
+    if let kernel::Event::UpdateDisplay { display_id, .. } = &event {
+        queued.retain(
+            |e| !matches!(e, kernel::Event::UpdateDisplay { display_id: d, .. } if d == display_id),
+        );
+    }
+    queued.push(event);
 }
 
 fn on_term_event(app: &mut App, rendered: &mut Rendered, event: Event) -> Action {
@@ -324,3 +343,38 @@ fn external_edit(
     let _ = std::fs::remove_file(&tmp);
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Queued updates of one display collapse to the latest; everything
+    /// else keeps its order.
+    #[test]
+    fn queued_display_updates_collapse_to_the_latest() {
+        let update = |id: &str, n: u8| kernel::Event::UpdateDisplay {
+            display_id: id.into(),
+            output: serde_json::json!(n),
+        };
+        let mut queued = Vec::new();
+        queue_kernel_event(&mut queued, update("a", 1));
+        queue_kernel_event(
+            &mut queued,
+            kernel::Event::Clear {
+                parent: "p".into(),
+                wait: false,
+            },
+        );
+        queue_kernel_event(&mut queued, update("b", 2));
+        queue_kernel_event(&mut queued, update("a", 3));
+        let seen: Vec<String> = queued
+            .iter()
+            .map(|e| match e {
+                kernel::Event::UpdateDisplay { display_id, output } => {
+                    format!("{display_id}{output}")
+                }
+                _ => "clear".into(),
+            })
+            .collect();
+        assert_eq!(seen, ["clear", "b2", "a3"]);
+    }
+}
