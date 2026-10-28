@@ -17,8 +17,14 @@ def frame(path, f, n):
     fig = plt.figure(figsize=(13, 3.6)); fig.subplots_adjust(0, 0, 1, 1, wspace=0)
     a, b = fig.add_subplot(121, projection="3d"), fig.add_subplot(122)
     a.set_axis_off(); a.view_init(25, -60 + 35*np.sin(2*np.pi*f/n)); a.set_box_aspect(None, zoom=1.4)
-    for seg, c in zip(np.array_split(path[:, :300 + 55*f], 24, axis=1), plt.cm.cool(np.linspace(0, 1, 24))):
-        a.plot(*seg, color=c, lw=0.6)
+    # 24 colour segments that share their joints (a split would leave the
+    # step between two segments undrawn: a gap on the fast outer loops)
+    pts = path[:, :300 + 55*f]; cuts = np.linspace(0, pts.shape[1], 25).astype(int)
+    for i, j, c in zip(cuts[:-1], cuts[1:], plt.cm.cool(np.linspace(0, 1, 24))):
+        a.plot(*pts[:, i:j + 1], color=c, lw=1.8)
     b.set_axis_off(); b.imshow((np.sqrt(escape(1.5*0.8**f, n=150+8*f))*0.6) % 1, cmap=gold, aspect="auto")
-    buf = io.BytesIO(); fig.savefig(buf, format="png"); plt.close(fig)
+    # transparent: the terminal's own background shows through, whatever
+    # colour it is. 140 dpi fills the clip's terminal width at native size
+    # and stays small enough to decode and resend sixteen times a second.
+    buf = io.BytesIO(); fig.savefig(buf, format="png", dpi=140, transparent=True); plt.close(fig)
     return buf.getvalue()
