@@ -63,6 +63,14 @@ struct KittyImage {
 /// image (a `display` handle, a re-run cell) until the redraw.
 static KITTY_DELETES: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
 
+/// A kitty image was created since the last frame, so that frame carries
+/// its transmit (see the synchronized update in the main loop).
+static KITTY_TRANSMIT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn take_kitty_transmit() -> bool {
+    KITTY_TRANSMIT.swap(false, std::sync::atomic::Ordering::Relaxed)
+}
+
 impl Drop for KittyImage {
     fn drop(&mut self) {
         let seq = format!("\x1b_Ga=d,d=I,i={},q=2\x1b\\", self.id);
@@ -788,6 +796,7 @@ impl Rendered {
             let tmux = picker.tmux_detected();
             let kitty = Kitty::new(img, size, id, tmux, compress).ok()?;
             entry.kitty = Some(KittyImage { id, tmux });
+            KITTY_TRANSMIT.store(true, std::sync::atomic::Ordering::Relaxed);
             SlicedProtocol::Kitty(kitty)
         } else {
             SlicedProtocol::new(picker, img, None).ok()?
@@ -2971,6 +2980,28 @@ mod tests {
 
     // 1x1 transparent png
     const PNG: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGNgAAIAAAUAAXpeqz8AAAAASUVORK5CYII=";
+
+    /// A dropped image's delete is held back for the flush after the next
+    /// frame, so its replacement is on screen first.
+    #[test]
+    fn kitty_deletes_wait_for_the_flush() {
+        drop(KittyImage {
+            id: 7_000_001,
+            tmux: false,
+        });
+        drop(KittyImage {
+            id: 7_000_002,
+            tmux: true,
+        });
+        let mut out = Vec::new();
+        flush_kitty_deletes(&mut out).unwrap();
+        let out = String::from_utf8(out).unwrap();
+        assert!(out.contains("\x1b_Ga=d,d=I,i=7000001,q=2\x1b\\"), "{out:?}");
+        assert!(
+            out.contains("\x1bPtmux;\x1b\x1b_Ga=d,d=I,i=7000002,q=2\x1b\x1b\\\x1b\\"),
+            "{out:?}"
+        );
+    }
 
     /// IPython < 9.14 highlights the error range as syntax colours on yellow.
     #[test]

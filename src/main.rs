@@ -156,6 +156,10 @@ async fn main() -> Result<()> {
     ))
     .catch_unwind()
     .await;
+    // the last frame's images queue their deletes at drop like replaced
+    // ones, and the loop that wrote those is over: write them here
+    drop(rendered);
+    let _ = ui::flush_kitty_deletes(&mut std::io::stdout());
     leave_extras(enhanced);
     let _ = crossterm::execute!(std::io::stdout(), SetCursorStyle::DefaultUserShape);
     // The terminal may be gone (closed under us). ratatui::restore() and
@@ -204,12 +208,29 @@ async fn run(
             cursor_mode = mode;
         }
         // One synchronized update per frame (terminals without it ignore
-        // the mode), so the terminal never shows a half-drawn frame: a
-        // replaced image's new copy and the old one's delete land together.
-        let _ = crossterm::execute!(std::io::stdout(), BeginSynchronizedUpdate);
-        terminal.draw(|frame| ui::draw(frame, app, rendered))?;
-        ui::flush_kitty_deletes(&mut std::io::stdout())?;
-        let _ = crossterm::execute!(std::io::stdout(), EndSynchronizedUpdate);
+        // the mode), so the terminal never shows a half-drawn frame. Except
+        // a frame that sends a new kitty image: kitty paints a snapshot of
+        // the screen while an update is open, and with a multi-megabyte
+        // transmit inside it that snapshot now and then comes up with no
+        // images at all, which blanks frames of an inline animation. Such
+        // a frame is a single write anyway.
+        let sync = !ui::take_kitty_transmit();
+        if sync {
+            let _ = crossterm::queue!(std::io::stdout(), BeginSynchronizedUpdate);
+        }
+        let drawn = terminal.draw(|frame| ui::draw(frame, app, rendered));
+        // ended even when the draw failed: a terminal left inside a
+        // synchronized update stops painting until its timeout
+        if sync {
+            let _ = crossterm::execute!(std::io::stdout(), EndSynchronizedUpdate);
+        }
+        // Replaced images are deleted only now, after the update that placed
+        // their successors: kitty shows a snapshot of the screen for the
+        // whole update, and the snapshot still needs the old image (deleting
+        // it inside the update blanked an animation's frames now and then).
+        let deleted = ui::flush_kitty_deletes(&mut std::io::stdout());
+        drawn?;
+        deleted?;
         tokio::select! {
             maybe_event = term_events.next() => {
                 let Some(event) = maybe_event else { break };
@@ -302,3 +323,4 @@ fn external_edit(
     }
     let _ = std::fs::remove_file(&tmp);
 }
+
